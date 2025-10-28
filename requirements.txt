@@ -1,29 +1,16 @@
 # Data handling
-pandas==2.2.2
-numpy==1.26.4
+pandas
+numpy
 
 # Data fetching
-yfinance==0.2.41
-requests==2.32.3
-lxml==5.3.0
-html5lib==1.1
-beautifulsoup4==4.12.3
+yfinance
+requests
 
-# Visualization
-matplotlib==3.9.2
-seaborn==0.13.2
-plotly==5.24.0
+matplotlib
+seaborn
+plotly
 
-# Machine Learning & Optimization
-scikit-learn==1.5.2
-scipy==1.14.1
-pulp==2.8.0
+scikit-learn
+scipy
+pulp
 
-# Notebook and utilities
-ipython==8.27.0
-jupyterlab==4.2.5
-tqdm==4.66.5
-
-# Optional (for finance/returns analysis)
-pandas-datareader==0.10.0
-statsmodels==0.14.3
