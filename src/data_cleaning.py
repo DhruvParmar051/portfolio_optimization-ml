@@ -12,7 +12,7 @@ Pipeline Steps:
 4. Trim data to start from first valid 'Close' price for each stock
 5. Save cleaned dataset to a parquet file
 
-Author: Dhruv
+Author: Mahak
 Date: 2025-10-29
 """
 
@@ -34,8 +34,8 @@ logging.basicConfig(
 )
 
 # File paths
-INPUT_PATH = "data/raw/all_stocks_data_with_sector.parquet"
-OUTPUT_PATH = "data/cleaned/cleaned_data.parquet"
+INPUT_PATH = os.path.join(os.getcwd(),'data','raw', 'all_stocks_data_with_sector.parquet')
+OUTPUT_PATH = os.path.join(os.getcwd(),'data','cleaned', 'cleaned_data.parquet')
 
 
 def load_data(path: str) -> pd.DataFrame:

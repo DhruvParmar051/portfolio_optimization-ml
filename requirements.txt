@@ -20,3 +20,4 @@ ipykernel
 pyarrow
 fastparquet
 missingno
+lxml
