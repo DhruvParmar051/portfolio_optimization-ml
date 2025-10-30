@@ -52,7 +52,7 @@ print("Sample after merging sector info:")
 print(data[['Date', 'Stock', 'Sector', 'Industry']].head())
 
 # === STEP 5: Save the dataset ===
-output_path = os.path.join(os.getcwd(), '..','data', 'all_stocks_data_with_sector.parquet')
+output_path = os.path.join(os.getcwd(),'data', 'all_stocks_data_with_sector.parquet')
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 data.to_parquet(output_path, index=False)
 
