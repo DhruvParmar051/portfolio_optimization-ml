@@ -122,7 +122,7 @@ class TimeSeriesSplitHelper:
                 "y_val": y_val
             }
 
-            logging.info(f"✅ {stock}: Train={n_train}, Validation={n_valid}, Total={n_total}")
+            logging.info(f"{stock}: Train={n_train}, Validation={n_valid}, Total={n_total}")
 
         return split_data
 
