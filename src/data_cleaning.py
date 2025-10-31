@@ -1,133 +1,111 @@
 """
 data_cleaning.py
 
-Cleans raw S&P 500 stock data — validates schema, removes invalid or incomplete
-series, handles missing data gracefully, and outputs a reliable dataset for
-feature engineering and modeling.
+This script handles the cleaning and validation of the raw stock dataset.
+It checks for missing data, identifies gaps, trims invalid sections, and
+prepares a reliable dataset for downstream analysis.
 
-Steps:
-1. Load raw dataset with sector info
-2. Validate structure (columns, datatypes)
-3. Trim each stock from its first valid 'Close' price
-4. Remove duplicate or corrupt rows
-5. Save cleaned dataset to parquet file
-
+Pipeline Steps:
+1. Load the raw dataset
+2. Identify missing stretches and analyze data gaps
+3. Trim each stock’s data to start from its first valid entry
+4. Save the cleaned dataset to 'data/cleaned/'
 """
 
-# ===========================================================
+# ======================================================================
 # Imports
-# ===========================================================
+# ======================================================================
 
 import os
 import pandas as pd
 import numpy as np
 import logging
 import warnings
-from datetime import datetime
 
 warnings.filterwarnings("ignore")
 
-# ===========================================================
-# Configuration
-# ===========================================================
-
-RAW_PATH = os.path.join(os.getcwd(), "data", "raw_data", "all_stocks_data_with_sector.parquet")
-OUTPUT_DIR = os.path.join(os.getcwd(), "data", "cleaned_data")
-OUTPUT_PATH = os.path.join(OUTPUT_DIR, "cleaned_data.parquet")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+# ======================================================================
+# Configuration and Logging
+# ======================================================================
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# ===========================================================
-# Helper Functions
-# ===========================================================
+INPUT_PATH = os.path.join(os.getcwd(), "data", "raw_data", "all_stocks_data_with_sector.parquet")
+OUTPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned_data", "cleaned_data.parquet")
 
-def validate_schema(df: pd.DataFrame):
-    """Ensure dataset has essential columns."""
-    required_cols = {"Date", "Close", "Stock", "Sector", "Industry"}
-    missing = required_cols - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing columns: {missing}")
+# ======================================================================
+# Core Cleaning Functions
+# ======================================================================
+
+def load_data(path: str) -> pd.DataFrame:
+    """Load the raw parquet dataset."""
+    if not os.path.exists(path):
+        logging.error(f"File not found: {path}")
+        raise FileNotFoundError(path)
+    df = pd.read_parquet(path)
+    logging.info(f"Loaded data with shape: {df.shape}")
     return df
 
 
-def trim_stock_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    For each stock, trim records to start from first valid 'Close' price.
-    Removes NaNs before first valid value.
-    """
+def analyze_missing_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Add missing flags and summarize missing periods."""
+    df["is_missing"] = df["Close"].isna().astype(int)
+
+    def _find_stretches(group):
+        group["gap_id"] = (group["is_missing"].ne(group["is_missing"].shift())).cumsum()
+        missing = group[group["is_missing"] == 1]
+        return (
+            missing.groupby("gap_id")
+            .agg(
+                Stock=("Stock", "first"),
+                start_date=("Date", "min"),
+                end_date=("Date", "max"),
+                missing_days=("Date", "count"),
+            )
+            .reset_index(drop=True)
+        )
+
+    missing_summary = df.groupby("Stock", group_keys=False).apply(_find_stretches)
+    logging.info(f"Detected {len(missing_summary)} missing stretches.")
+    logging.info(f"Example missing stretches:\n{missing_summary.head(5)}")
+    return df
+
+
+def trim_invalid_starts(df: pd.DataFrame) -> pd.DataFrame:
+    """Trim each stock’s data from its first valid 'Close' value."""
     df = df.sort_values(["Stock", "Date"])
-    cleaned = []
-    for stock, group in df.groupby("Stock"):
-        first_valid = group["Close"].first_valid_index()
-        if first_valid is None:
-            logging.warning(f"{stock}: No valid Close values — skipped.")
-            continue
-        group = group.loc[first_valid:]
-        cleaned.append(group)
-    trimmed = pd.concat(cleaned, ignore_index=True)
-    logging.info(f"Trimmed data for {len(trimmed['Stock'].unique())} stocks.")
+
+    def _trim(group):
+        idx = group["Close"].first_valid_index()
+        return group.loc[idx:] if idx is not None else group
+
+    trimmed = df.groupby("Stock", group_keys=False).apply(_trim)
+    trimmed = trimmed.drop(columns=["is_missing"], errors="ignore")
+    logging.info(f"Trimmed dataset shape: {trimmed.shape}")
     return trimmed
 
 
-def handle_missing_data(df: pd.DataFrame, threshold: float = 0.3) -> pd.DataFrame:
-    """
-    Drop stocks with excessive missing Close values (>threshold fraction).
-    """
-    miss_ratio = df.groupby("Stock")["Close"].apply(lambda x: x.isna().mean())
-    to_drop = miss_ratio[miss_ratio > threshold].index
-    if len(to_drop) > 0:
-        logging.warning(f"Dropping {len(to_drop)} stocks with >{threshold*100:.0f}% missing data.")
-    df = df[~df["Stock"].isin(to_drop)]
-    df = df.dropna(subset=["Close"])
-    return df
+def save_data(df: pd.DataFrame, path: str):
+    """Save cleaned dataset."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    df.to_parquet(path, index=False)
+    logging.info(f"Cleaned data saved at: {path}")
 
-
-def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-    """Remove duplicate (Stock, Date) pairs."""
-    before = len(df)
-    df = df.drop_duplicates(subset=["Stock", "Date"])
-    after = len(df)
-    if before != after:
-        logging.info(f"Removed {before - after} duplicate rows.")
-    return df
-
-
-def enrich_metadata(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure proper data types and add metadata fields."""
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df = df.dropna(subset=["Date"])
-    df["Year"] = df["Date"].dt.year
-    df["Month"] = df["Date"].dt.month
-    return df
-
-# ===========================================================
-# Main Cleaning Pipeline
-# ===========================================================
+# ======================================================================
+# Main Pipeline
+# ======================================================================
 
 def data_cleaning():
-    """Run complete data cleaning pipeline."""
+    """Run the full data cleaning pipeline."""
     try:
-        logging.info("Loading raw dataset...")
-        df = pd.read_parquet(RAW_PATH)
-        logging.info(f"Loaded raw data: {df.shape}")
-
-        df = validate_schema(df)
-        df = trim_stock_data(df)
-        df = handle_missing_data(df)
-        df = remove_duplicates(df)
-        df = enrich_metadata(df)
-
-        df = df.sort_values(["Stock", "Date"]).reset_index(drop=True)
-
-        df.to_parquet(OUTPUT_PATH, index=False)
-        logging.info(f"Cleaned dataset saved → {OUTPUT_PATH}")
-        logging.info(f"Final shape: {df.shape}")
-
+        df = load_data(INPUT_PATH)
+        df = analyze_missing_data(df)
+        cleaned = trim_invalid_starts(df)
+        save_data(cleaned, OUTPUT_PATH)
+        logging.info("Data cleaning completed successfully.")
     except Exception as e:
-        logging.exception(f"Data cleaning failed: {e}")
+        logging.exception("Data cleaning failed.")
+
