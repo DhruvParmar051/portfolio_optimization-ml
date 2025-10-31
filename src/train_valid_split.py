@@ -106,7 +106,7 @@ def save_splits(splits: Dict[str, Dict[str, pd.DataFrame]], output_dir: str):
 # Main Pipeline
 # ======================================================================
 
-def main():
+def train_valid_split():
     """Run the time-series split pipeline."""
     try:
         df = load_data(INPUT_PATH)
@@ -118,6 +118,3 @@ def main():
     except Exception as e:
         logging.exception("Splitting pipeline failed.")
 
-
-if __name__ == "__main__":
-    main()

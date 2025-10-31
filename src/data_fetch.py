@@ -32,7 +32,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-RAW_DATA_PATH = os.path.join(os.getcwd(), "data", "raw", "all_stocks_data_with_sector.parquet")
+RAW_DATA_PATH = os.path.join(os.getcwd(), "data", "raw_data", "all_stocks_data_with_sector.parquet")
 
 # ======================================================================
 # Data Fetching Functions
@@ -103,7 +103,7 @@ def save_data(df, path):
 # Main Pipeline
 # ======================================================================
 
-def main():
+def data_fetch():
     """Run the complete data fetching pipeline."""
     try:
         sp500 = get_sp500_tickers()
@@ -115,6 +115,3 @@ def main():
     except Exception as e:
         logging.exception("Data fetching failed due to an error.")
 
-
-if __name__ == "__main__":
-    main()

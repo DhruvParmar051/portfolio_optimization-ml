@@ -29,8 +29,8 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-INPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned", "cleaned_data.parquet")
-OUTPUT_PATH = os.path.join(os.getcwd(), "data", "feature_engineering", "engineered_data.parquet")
+INPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned_data", "cleaned_data.parquet")
+OUTPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "engineered_data.parquet")
 
 # ======================================================================
 # Feature Engineering Functions
@@ -89,7 +89,7 @@ def save_data(df, path):
 # Main Pipeline
 # ======================================================================
 
-def main():
+def feature_engineering():
     """Run the complete feature engineering pipeline."""
     try:
         df = load_data(INPUT_PATH)
@@ -101,6 +101,3 @@ def main():
     except Exception as e:
         logging.exception("Feature engineering pipeline failed.")
 
-
-if __name__ == "__main__":
-    main()
