@@ -1,37 +1,12 @@
 """
-portfolio_optimizer.py
+optimize_portfolio.py
 
-Generates an optimal portfolio allocation based on user input:
-- Stocks of interest
-- Total capital
-- Risk tolerance (low / medium / high)
-- Investment horizon (in months or years)
-
-Uses the trained return and risk models to estimate expected return
-and volatility, then applies Mean-Variance Optimization to find the
-best allocation.
-
-Finally, estimates the expected portfolio value at the end of the
-investment period using compounded returns.
-
-Author: Dhruv
-Date: 2025-10-31
+Optimizes portfolio allocation for user-selected stocks
+using trained global return and volatility models.
 """
 
-# ======================================================================
-# Imports
-# ======================================================================
-
-import os
-import numpy as np
-import pandas as pd
-import joblib
-import logging
+import os, numpy as np, pandas as pd, joblib, logging
 from scipy.optimize import minimize
-
-# ======================================================================
-# Configuration
-# ======================================================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -39,115 +14,47 @@ MODEL_DIR = os.path.join(os.getcwd(), "models")
 RETURN_MODEL_PATH = os.path.join(MODEL_DIR, "model_return.pkl")
 VOL_MODEL_PATH = os.path.join(MODEL_DIR, "model_vol.pkl")
 
-# ======================================================================
-# Core Portfolio Optimizer
-# ======================================================================
 
-def portfolio_optimizer(selected_stocks, capital, risk_tolerance, time_period_months):
-    """
-    Generate an optimal portfolio based on user inputs.
+def portfolio_optimizer(selected_stocks, capital, risk_tolerance, months):
+    if not (os.path.exists(RETURN_MODEL_PATH) and os.path.exists(VOL_MODEL_PATH)):
+        raise FileNotFoundError("Trained models missing.")
 
-    Parameters
-    ----------
-    selected_stocks : list[str]
-        Stock symbols user is interested in
-    capital : float
-        Total amount to invest
-    risk_tolerance : str
-        'low', 'medium', or 'high'
-    time_period_months : int
-        Investment duration in months
-
-    Returns
-    -------
-    pd.DataFrame
-        Portfolio with optimal weights, expected returns, volatility, and
-        projected investment outcome.
-    """
-
-    # ---------------------------------------------------------
-    # Load trained models
-    # ---------------------------------------------------------
-    if not os.path.exists(RETURN_MODEL_PATH) or not os.path.exists(VOL_MODEL_PATH):
-        raise FileNotFoundError("Models not found. Please run model_training.py first.")
-
-    model_return = joblib.load(RETURN_MODEL_PATH)
-    model_vol = joblib.load(VOL_MODEL_PATH)
-
-    # ---------------------------------------------------------
-    # Load most recent stock features
-    # ---------------------------------------------------------
-    data_path = os.path.join(os.getcwd(), "data", "processed", "final_features.parquet")
-    if not os.path.exists(data_path):
-        raise FileNotFoundError("Processed data not found. Run the preprocessing pipeline first.")
-
-    df = pd.read_parquet(data_path)
+    m_ret, m_vol = joblib.load(RETURN_MODEL_PATH), joblib.load(VOL_MODEL_PATH)
+    df = pd.read_parquet(os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet"))
     df = df[df["Stock"].isin(selected_stocks)].groupby("Stock").tail(1)
 
-    if df.empty:
-        raise ValueError("None of the selected stocks found in processed data.")
+    X = df.drop(columns=["Date", "Stock"], errors="ignore").select_dtypes(include="number").fillna(0)
+    exp_ret, exp_vol = m_ret.predict(X), m_vol.predict(X)
 
-    X = df.drop(columns=["future_return", "volatility", "Stock", "Date"], errors="ignore")
-
-    expected_returns = model_return.predict(X)  # per period (e.g., daily or monthly)
-    predicted_vol = model_vol.predict(X)
-
-    # ---------------------------------------------------------
-    # Optimization setup
-    # ---------------------------------------------------------
     n = len(selected_stocks)
-    cov_matrix = np.diag(predicted_vol ** 2)
+    cov = np.diag(exp_vol ** 2)
+    risk_factor = {"low": 0.2, "medium": 0.5, "high": 0.8}.get(risk_tolerance.lower(), 0.5)
 
-    # Map user risk tolerance
-    risk_map = {"low": 0.2, "medium": 0.5, "high": 0.8}
-    risk_factor = risk_map.get(risk_tolerance.lower(), 0.5)
+    def objective(w):
+        p_ret, p_vol = np.dot(w, exp_ret), np.sqrt(np.dot(w.T, np.dot(cov, w)))
+        return - (risk_factor * p_ret - (1 - risk_factor) * p_vol)
 
-    def objective(weights):
-        portfolio_return = np.dot(weights, expected_returns)
-        portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        # Higher risk tolerance => prioritize returns more
-        return - (risk_factor * portfolio_return - (1 - risk_factor) * portfolio_vol)
+    cons = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
+    res = minimize(objective, np.ones(n)/n, bounds=[(0,1)]*n, constraints=cons)
+    w = res.x
 
-    constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
-    bounds = tuple((0, 1) for _ in range(n))
-    initial_guess = np.ones(n) / n
+    port_ret = np.dot(w, exp_ret)
+    total_ret = (1 + port_ret) ** months - 1
+    final_val = capital * (1 + total_ret)
+    profit = final_val - capital
 
-    result = minimize(objective, initial_guess, bounds=bounds, constraints=constraints)
-    weights = result.x
-
-    # ---------------------------------------------------------
-    # Expected Portfolio Performance
-    # ---------------------------------------------------------
-    portfolio_expected_return = np.dot(weights, expected_returns)
-    portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-
-    # Assuming expected_returns is monthly return, compound it:
-    monthly_return = portfolio_expected_return
-    total_return = (1 + monthly_return) ** time_period_months - 1
-    expected_final_value = capital * (1 + total_return)
-    expected_profit = expected_final_value - capital
-
-    # ---------------------------------------------------------
-    # Build Result Table
-    # ---------------------------------------------------------
-    df_result = pd.DataFrame({
+    df_out = pd.DataFrame({
         "Stock": selected_stocks,
-        "Weight": weights,
-        "Expected_Monthly_Return": expected_returns,
-        "Predicted_Volatility": predicted_vol,
-        "Investment_Amount": weights * capital
+        "Weight": w,
+        "Expected_Monthly_Return": exp_ret,
+        "Predicted_Volatility": exp_vol,
+        "Investment_Amount": w * capital
     })
-
     summary = {
         "Total_Capital": capital,
-        "Expected_Annualized_Return_%": round(total_return * 100, 2),
-        "Expected_Final_Value": round(expected_final_value, 2),
-        "Expected_Profit": round(expected_profit, 2),
-        "Portfolio_Volatility": round(portfolio_volatility, 4)
+        "Expected_Final_Value": round(final_val, 2),
+        "Expected_Profit": round(profit, 2),
+        "Portfolio_Volatility": round(np.sqrt(np.dot(w.T, np.dot(cov, w))), 4)
     }
-
-    logging.info("✅ Portfolio optimization complete.")
-    logging.info(f"Expected final portfolio value: ₹{expected_final_value:,.2f}")
-    logging.info(f"Expected profit: ₹{expected_profit:,.2f}")
-
-    return df_result, summary
+    logging.info(f"Portfolio optimized → ₹{final_val:,.2f} expected value.")
+    return df_out, summary

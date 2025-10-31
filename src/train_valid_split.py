@@ -26,7 +26,21 @@ def train_valid_split(valid_ratio=0.2):
     X_val.to_parquet(os.path.join(OUTPUT_DIR, "X_val.parquet"), index=False)
     y_val.to_frame("target").to_parquet(os.path.join(OUTPUT_DIR, "y_val.parquet"), index=False)
 
-    logging.info(f"✅ Train={len(X_train)}, Val={len(X_val)} saved to {OUTPUT_DIR}")
+        logging.info(f"Saved splits for {stock} at {stock_dir}")
 
-if __name__ == "__main__":
-    train_valid_split()
+# ======================================================================
+# Main Pipeline
+# ======================================================================
+
+def train_valid_split():
+    """Run the time-series split pipeline."""
+    try:
+        df = load_data(INPUT_PATH)
+        splitter = TimeSeriesSplitHelper()
+        features = ["Open", "High", "Low", "Volume", "Adj Close"]
+        splits = splitter.split(df, feature_cols=features, valid_ratio=0.2)
+        save_splits(splits, OUTPUT_DIR)
+        logging.info("Train–validation splitting completed successfully.")
+    except Exception as e:
+        logging.exception("Splitting pipeline failed.")
+

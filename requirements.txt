@@ -22,3 +22,6 @@ pyarrow
 fastparquet
 missingno
 lxml
+
+google 
+protobuf

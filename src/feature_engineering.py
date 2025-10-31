@@ -33,12 +33,14 @@ def create_sector_features(df):
 
 
 def feature_engineering():
-    df = pd.read_parquet(INPUT_PATH)
-    df = create_stock_features(df)
-    df = create_sector_features(df)
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    df.to_parquet(OUTPUT_PATH, index=False)
-    logging.info(f"✅ Feature engineering complete. Shape: {df.shape}")
+    """Run the complete feature engineering pipeline."""
+    try:
+        df = load_data(INPUT_PATH)
+        df = create_stock_features(df)
+        sector_df = create_sector_features(df)
+        final_df = merge_sector_features(df, sector_df)
+        save_data(final_df, OUTPUT_PATH)
+        logging.info("Feature engineering completed successfully.")
+    except Exception as e:
+        logging.exception("Feature engineering pipeline failed.")
 
-if __name__ == "__main__":
-    feature_engineering()
