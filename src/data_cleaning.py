@@ -33,8 +33,8 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-INPUT_PATH = os.path.join(os.getcwd(), "data", "raw", "all_stocks_data_with_sector.parquet")
-OUTPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned", "cleaned_data.parquet")
+INPUT_PATH = os.path.join(os.getcwd(), "data", "raw_data", "all_stocks_data_with_sector.parquet")
+OUTPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned_data", "cleaned_data.parquet")
 
 # ======================================================================
 # Core Cleaning Functions
@@ -98,7 +98,7 @@ def save_data(df: pd.DataFrame, path: str):
 # Main Pipeline
 # ======================================================================
 
-def main():
+def data_cleaning():
     """Run the full data cleaning pipeline."""
     try:
         df = load_data(INPUT_PATH)
@@ -109,6 +109,3 @@ def main():
     except Exception as e:
         logging.exception("Data cleaning failed.")
 
-
-if __name__ == "__main__":
-    main()
