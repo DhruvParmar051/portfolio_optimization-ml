@@ -40,7 +40,7 @@ logging.basicConfig(
 # File Paths
 # ======================================================================
 
-INPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "engineered_data.parquet")
+INPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
 OUTPUT_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
 
 # ======================================================================
@@ -140,3 +140,5 @@ def preprocessor():
     except Exception as e:
         logging.exception("Preprocessing failed due to an unexpected error.")
 
+if __name__ == "__main__":
+    preprocessor()
