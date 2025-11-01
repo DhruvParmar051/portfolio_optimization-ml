@@ -1,94 +1,126 @@
 """
 model.py
 
-This module defines and trains an ARIMA model for time-series forecasting
-on each stock’s adjusted closing prices.
+Trains and evaluates per-stock ARIMA models using time-series data.
+The script loads train/validation splits, fits ARIMA models, forecasts
+validation periods, and saves the results.
 
-Steps:
-1. Loads the training and validation data
-2. Fits ARIMA(p, d, q) per stock
-3. Generates forecasts
-4. Evaluates performance (MAE, RMSE)
-5. Saves model summaries and metrics
+Pipeline Steps:
+1. Load X/y train–validation splits from `data/splits/`
+2. Fit ARIMA model on the training target (`y_train`)
+3. Forecast the validation horizon length
+4. Evaluate model performance using RMSE
+5. Save model summaries and predictions
 
 Author: Dhruv
+Date: 2025-11-01
 """
+
+# ======================================================================
+# Imports
+# ======================================================================
 
 import os
 import pandas as pd
 import numpy as np
 import logging
 from statsmodels.tsa.arima.model import ARIMA
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_squared_error
+import joblib
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# ======================================================================
+# Logging Configuration
+# ======================================================================
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+# ======================================================================
 # Paths
-DATA_DIR = os.path.join(os.getcwd(), "data", "processed_data")
-MODEL_OUTPUT_DIR = os.path.join(os.getcwd(), "models")
-os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
+# ======================================================================
+
+DATA_DIR = os.path.join(os.getcwd(), "data", "splits")
+MODEL_DIR = os.path.join(os.getcwd(), "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+X_TRAIN_PATH = os.path.join(DATA_DIR, "X_train.parquet")
+Y_TRAIN_PATH = os.path.join(DATA_DIR, "y_train.parquet")
+X_VAL_PATH = os.path.join(DATA_DIR, "X_val.parquet")
+Y_VAL_PATH = os.path.join(DATA_DIR, "y_val.parquet")
+
+# ======================================================================
+# Core ARIMA Functions
+# ======================================================================
+
+def load_data():
+    """Load pre-split training and validation datasets."""
+    logging.info("Loading training and validation splits...")
+
+    X_train = pd.read_parquet(X_TRAIN_PATH)
+    y_train = pd.read_parquet(Y_TRAIN_PATH)["target"]
+    X_val = pd.read_parquet(X_VAL_PATH)
+    y_val = pd.read_parquet(Y_VAL_PATH)["target"]
+
+    logging.info(f"Loaded: X_train={X_train.shape}, X_val={X_val.shape}")
+    return X_train, y_train, X_val, y_val
 
 
-def fit_arima_per_stock(train_df, valid_df, order=(1, 1, 1)):
-    """
-    Fits an ARIMA model for each stock and evaluates performance.
+def train_arima(y_train, order=(1, 1, 1)):
+    """Fit an ARIMA model on training data."""
+    logging.info(f"Training ARIMA model with order={order}...")
+    model = ARIMA(y_train, order=order)
+    fitted_model = model.fit()
+    logging.info("Model training completed.")
+    return fitted_model
 
-    Args:
-        train_df (pd.DataFrame): training dataset with columns ['Date', 'Ticker', 'Adj Close']
-        valid_df (pd.DataFrame): validation dataset
-        order (tuple): ARIMA order (p, d, q)
 
-    Returns:
-        pd.DataFrame: results with metrics per stock
-    """
-    results = []
+def evaluate_model(model, y_val):
+    """Forecast and evaluate the ARIMA model."""
+    logging.info("Forecasting on validation data...")
+    forecast = model.forecast(steps=len(y_val))
+    rmse = np.sqrt(mean_squared_error(y_val, forecast))
+    logging.info(f"Validation RMSE: {rmse:.4f}")
+    return forecast, rmse
 
-    tickers = train_df["Ticker"].unique()
-    for ticker in tickers:
-        logging.info(f"Training ARIMA{order} for {ticker}...")
 
-        train_data = train_df[train_df["Ticker"] == ticker].sort_values("Date")
-        valid_data = valid_df[valid_df["Ticker"] == ticker].sort_values("Date")
+def save_model(model, name="arima_model.pkl"):
+    """Save the trained model object."""
+    path = os.path.join(MODEL_DIR, name)
+    joblib.dump(model, path)
+    logging.info(f"Model saved at: {path}")
 
-        try:
-            model = ARIMA(train_data["Adj Close"], order=order)
-            model_fit = model.fit()
-            forecast = model_fit.forecast(steps=len(valid_data))
 
-            mae = mean_absolute_error(valid_data["Adj Close"], forecast)
-            rmse = np.sqrt(mean_squared_error(valid_data["Adj Close"], forecast))
+def save_predictions(y_val, forecast):
+    """Save forecast vs actual comparison."""
+    results = pd.DataFrame({"Actual": y_val.values, "Forecast": forecast})
+    output_path = os.path.join(MODEL_DIR, "arima_predictions.parquet")
+    results.to_parquet(output_path, index=False)
+    logging.info(f"Predictions saved at: {output_path}")
 
-            results.append({
-                "Ticker": ticker,
-                "MAE": mae,
-                "RMSE": rmse
-            })
-
-            # Save model summary
-            with open(os.path.join(MODEL_OUTPUT_DIR, f"{ticker}_arima_summary.txt"), "w") as f:
-                f.write(str(model_fit.summary()))
-
-        except Exception as e:
-            logging.error(f"ARIMA failed for {ticker}: {e}")
-
-    return pd.DataFrame(results)
-
+# ======================================================================
+# Main Pipeline
+# ======================================================================
 
 def main():
-    logging.info("Loading training and validation datasets...")
-    train_path = os.path.join(DATA_DIR, "train.parquet")
-    valid_path = os.path.join(DATA_DIR, "valid.parquet")
+    """Run the ARIMA training and evaluation pipeline."""
+    try:
+        X_train, y_train, X_val, y_val = load_data()
 
-    train_df = pd.read_parquet(train_path)
-    valid_df = pd.read_parquet(valid_path)
+        # Train ARIMA on training target
+        model = train_arima(y_train, order=(1, 1, 1))
 
-    logging.info("Fitting ARIMA models per stock...")
-    metrics_df = fit_arima_per_stock(train_df, valid_df, order=(1, 1, 1))
+        # Evaluate
+        forecast, rmse = evaluate_model(model, y_val)
 
-    metrics_path = os.path.join(MODEL_OUTPUT_DIR, "arima_results.csv")
-    metrics_df.to_csv(metrics_path, index=False)
+        # Save model and results
+        save_model(model)
+        save_predictions(y_val, forecast)
 
-    logging.info(f"ARIMA training complete. Results saved to: {metrics_path}")
+        logging.info("ARIMA training and evaluation pipeline completed successfully.")
+    except Exception as e:
+        logging.exception("ARIMA pipeline failed.")
 
 
 if __name__ == "__main__":
