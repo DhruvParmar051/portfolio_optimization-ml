@@ -1,6 +1,7 @@
 """
 model.py
 
+<<<<<<< HEAD
 Expanding-window ARIMA backtest per stock for portfolio modeling (parallel + optimized).
 
 This module:
@@ -19,9 +20,24 @@ Optimizations:
 # ============================================================
 # Imports
 # ============================================================
+=======
+This module defines and trains an ARIMA model for time-series forecasting
+on each stock’s adjusted closing prices.
+
+Steps:
+1. Loads the training and validation data
+2. Fits ARIMA(p, d, q) per stock
+3. Generates forecasts
+4. Evaluates performance (MAE, RMSE)
+5. Saves model summaries and metrics
+
+Author: Dhruv
+"""
+>>>>>>> c97fbfd (Kuch to kiya hai)
 
 import os
 import numpy as np
+<<<<<<< HEAD
 import pandas as pd
 import logging
 from itertools import product
@@ -73,48 +89,103 @@ def train_arima(y_train, order=(1, 1, 1)):
     return fitted_model
 
 
-def evaluate_model(model, y_val):
-    """Forecast and evaluate the ARIMA model."""
-    logging.info("Forecasting on validation data...")
-    forecast = model.forecast(steps=len(y_val))
-    rmse = np.sqrt(mean_squared_error(y_val, forecast))
-    logging.info(f"Validation RMSE: {rmse:.4f}")
-    return forecast, rmse
+def expanding_window_forecast(stock, df_stock):
+    """
+    Perform expanding-window ARIMA backtest on a single stock.
+    Saves checkpoint as soon as completed.
+    """
+    results = []
+    df_stock = df_stock.sort_values("Date").reset_index(drop=True)
+    y, dates = df_stock["Close"], df_stock["Date"]
+    n = len(y)
+
+    if n <= ROLLING_START + FORECAST_HORIZON:
+        logging.warning(f"{stock}: insufficient data ({n} obs), skipping.")
+        return None
+
+    cache_path = os.path.join(MODEL_DIR, f"{stock}_order.pkl")
+    best_order = select_best_order(y.iloc[:ROLLING_START], cache_path)
+
+    logging.info(f"{stock}: Using ARIMA{best_order} with {n} data points.")
+
+    for end_idx in range(ROLLING_START, n - FORECAST_HORIZON, FORECAST_HORIZON):
+        train = y.iloc[:end_idx]
+        test = y.iloc[end_idx:end_idx + FORECAST_HORIZON]
+        test_dates = dates.iloc[end_idx:end_idx + FORECAST_HORIZON]
+
+        try:
+            model = ARIMA(train, order=best_order)
+            fitted = model.fit()
+            forecast = fitted.forecast(steps=len(test))
+            rmse = np.sqrt(mean_squared_error(test, forecast))
+
+            results.append(pd.DataFrame({
+                "Date": test_dates.values,
+                "Stock": stock,
+                "Actual": test.values,
+                "Forecast": forecast.values,
+                "RMSE": rmse,
+                "Order_p": best_order[0],
+                "Order_d": best_order[1],
+                "Order_q": best_order[2],
+                "Train_End_Date": dates.iloc[end_idx - 1]
+            }))
+        except Exception as e:
+            logging.error(f"{stock}: failed at {end_idx} → {e}")
+            continue
+
+    if not results:
+        return None
+
+    out_df = pd.concat(results, ignore_index=True)
+    out_path = os.path.join(MODEL_DIR, f"{stock}_forecasts.parquet")
+    out_df.to_parquet(out_path, index=False)
+    logging.info(f"{stock}: saved forecasts ({len(out_df)} rows).")
+    return out_df
 
 
-def save_model(model, name="arima_model.pkl"):
-    """Save the trained model object."""
-    path = os.path.join(MODEL_DIR, name)
-    joblib.dump(model, path)
-    logging.info(f"Model saved at: {path}")
+# ============================================================
+# Main pipeline
+# ============================================================
 
+def run_expanding_arima():
+    """Run expanding-window ARIMA in parallel for all stocks."""
+    logging.info("Loading preprocessed data...")
+    df = pd.read_parquet(DATA_PATH)
+    df["Date"] = pd.to_datetime(df["Date"])
+    if "Stock" not in df.columns or "Close" not in df.columns:
+        raise ValueError("Expected columns ['Stock', 'Date', 'Close'].")
 
-def save_predictions(y_val, forecast):
-    """Save forecast vs actual comparison."""
-    results = pd.DataFrame({"Actual": y_val.values, "Forecast": forecast})
-    output_path = os.path.join(MODEL_DIR, "arima_predictions.parquet")
-    results.to_parquet(output_path, index=False)
-    logging.info(f"Predictions saved at: {output_path}")
+    logging.info(f"Dataset loaded: {df.shape}, running on {N_JOBS} CPU cores.")
+    stocks = sorted(df["Stock"].unique())
 
-# ======================================================================
-# Main Pipeline
-# ======================================================================
+    completed = {f.split('_forecasts.parquet')[0] for f in os.listdir(MODEL_DIR) if f.endswith("_forecasts.parquet")}
+    stocks = [s for s in stocks if s not in completed]
 
-def run_arima_models():
-    """Run the ARIMA training and evaluation pipeline."""
-    try:
-        X_train, y_train, X_val, y_val = load_data()
+    logging.info(f"Remaining stocks to process: {len(stocks)} (skipping {len(completed)})")
 
-        # Train ARIMA on training target
-        model = train_arima(y_train, order=(1, 1, 1))
+    if not stocks:
+        logging.info("All stocks already processed. Skipping retraining.")
+        return
 
-        # Evaluate
-        forecast, rmse = evaluate_model(model, y_val)
+    results = Parallel(n_jobs=N_JOBS, verbose=10)(
+        delayed(expanding_window_forecast)(s, df[df["Stock"] == s]) for s in stocks
+    )
 
-        # Save model and results
-        save_model(model)
-        save_predictions(y_val, forecast)
+    results = [r for r in results if r is not None]
+    if not results:
+        logging.warning("No results produced.")
+        return
 
-        logging.info("ARIMA training and evaluation pipeline completed successfully.")
-    except Exception as e:
-        logging.exception("ARIMA pipeline failed.")
+    all_df = pd.concat(results, ignore_index=True)
+    summary = all_df.groupby("Stock")["RMSE"].mean().reset_index()
+
+    forecasts_path = os.path.join(MODEL_DIR, "arima_expanding_forecasts.parquet")
+    summary_path = os.path.join(MODEL_DIR, "arima_expanding_summary.csv")
+
+    all_df.to_parquet(forecasts_path, index=False)
+    summary.to_csv(summary_path, index=False)
+
+    logging.info(f"Expanding-window ARIMA complete.")
+    logging.info(f"Forecasts saved → {forecasts_path}")
+    logging.info(f"Summary saved → {summary_path}")
