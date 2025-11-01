@@ -29,7 +29,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-INPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned", "cleaned_data.parquet")
+INPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned_data", "cleaned_data.parquet")
 OUTPUT_DIR = os.path.join(os.getcwd(), "data", "splits")
 
 # ======================================================================
@@ -118,3 +118,5 @@ def train_valid_split():
     except Exception as e:
         logging.exception("Splitting pipeline failed.")
 
+if __name__ == "__main__":
+    train_valid_split()

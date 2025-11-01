@@ -1,80 +1,95 @@
 """
-model_training.py
+model.py
 
-This module trains machine learning models to predict
-expected stock returns and risk (volatility) using
-the preprocessed dataset. These models are later used
-by the portfolio optimizer to recommend optimal portfolios.
+This module defines and trains an ARIMA model for time-series forecasting
+on each stock’s adjusted closing prices.
 
 Steps:
-1. Load preprocessed data
-2. Train ML model for return prediction
-3. Train ML model for risk estimation
-4. Save both models for use in portfolio_optimizer.py
-"""
+1. Loads the training and validation data
+2. Fits ARIMA(p, d, q) per stock
+3. Generates forecasts
+4. Evaluates performance (MAE, RMSE)
+5. Saves model summaries and metrics
 
-# ======================================================================
-# Imports
-# ======================================================================
+Author: Dhruv
+"""
 
 import os
 import pandas as pd
 import numpy as np
-import joblib
 import logging
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
-
-# ======================================================================
-# Configuration
-# ======================================================================
+from statsmodels.tsa.arima.model import ARIMA
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-INPUT_PATH = os.path.join(os.getcwd(), "data", "processed", "final_features.parquet")
-MODEL_DIR = os.path.join(os.getcwd(), "models")
-os.makedirs(MODEL_DIR, exist_ok=True)
+# Paths
+DATA_DIR = os.path.join(os.getcwd(), "data", "processed_data")
+MODEL_OUTPUT_DIR = os.path.join(os.getcwd(), "models")
+os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 
-# ======================================================================
-# Model Training Functions
-# ======================================================================
 
-def model_training():
-    """Train models for predicting returns and volatility."""
+def fit_arima_per_stock(train_df, valid_df, order=(1, 1, 1)):
+    """
+    Fits an ARIMA model for each stock and evaluates performance.
 
-    if not os.path.exists(INPUT_PATH):
-        raise FileNotFoundError(f"Processed file not found: {INPUT_PATH}")
+    Args:
+        train_df (pd.DataFrame): training dataset with columns ['Date', 'Ticker', 'Adj Close']
+        valid_df (pd.DataFrame): validation dataset
+        order (tuple): ARIMA order (p, d, q)
 
-    df = pd.read_parquet(INPUT_PATH)
-    logging.info(f"Loaded dataset with shape: {df.shape}")
+    Returns:
+        pd.DataFrame: results with metrics per stock
+    """
+    results = []
 
-    # Ensure target columns exist
-    if "future_return" not in df.columns or "volatility" not in df.columns:
-        raise ValueError("Processed dataset must contain 'future_return' and 'volatility' columns")
+    tickers = train_df["Ticker"].unique()
+    for ticker in tickers:
+        logging.info(f"Training ARIMA{order} for {ticker}...")
 
-    feature_cols = [col for col in df.columns if col not in ["future_return", "volatility", "Stock", "Date"]]
-    X = df[feature_cols]
-    y_return = df["future_return"]
-    y_vol = df["volatility"]
+        train_data = train_df[train_df["Ticker"] == ticker].sort_values("Date")
+        valid_data = valid_df[valid_df["Ticker"] == ticker].sort_values("Date")
 
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y_return, test_size=0.2, random_state=42)
+        try:
+            model = ARIMA(train_data["Adj Close"], order=order)
+            model_fit = model.fit()
+            forecast = model_fit.forecast(steps=len(valid_data))
 
-    # Train return prediction model
-    model_return = RandomForestRegressor(n_estimators=100, random_state=42)
-    model_return.fit(X_train, y_train)
+            mae = mean_absolute_error(valid_data["Adj Close"], forecast)
+            rmse = np.sqrt(mean_squared_error(valid_data["Adj Close"], forecast))
 
-    preds = model_return.predict(X_test)
-    rmse = mean_squared_error(y_test, preds, squared=False)
-    logging.info(f"Return prediction model RMSE: {rmse:.4f}")
+            results.append({
+                "Ticker": ticker,
+                "MAE": mae,
+                "RMSE": rmse
+            })
 
-    # Train volatility prediction model
-    model_vol = RandomForestRegressor(n_estimators=100, random_state=42)
-    model_vol.fit(X_train, y_vol)
+            # Save model summary
+            with open(os.path.join(MODEL_OUTPUT_DIR, f"{ticker}_arima_summary.txt"), "w") as f:
+                f.write(str(model_fit.summary()))
 
-    # Save both models
-    joblib.dump(model_return, os.path.join(MODEL_DIR, "model_return.pkl"))
-    joblib.dump(model_vol, os.path.join(MODEL_DIR, "model_vol.pkl"))
+        except Exception as e:
+            logging.error(f"ARIMA failed for {ticker}: {e}")
 
-    logging.info("Models trained and saved successfully.")
+    return pd.DataFrame(results)
+
+
+def main():
+    logging.info("Loading training and validation datasets...")
+    train_path = os.path.join(DATA_DIR, "train.parquet")
+    valid_path = os.path.join(DATA_DIR, "valid.parquet")
+
+    train_df = pd.read_parquet(train_path)
+    valid_df = pd.read_parquet(valid_path)
+
+    logging.info("Fitting ARIMA models per stock...")
+    metrics_df = fit_arima_per_stock(train_df, valid_df, order=(1, 1, 1))
+
+    metrics_path = os.path.join(MODEL_OUTPUT_DIR, "arima_results.csv")
+    metrics_df.to_csv(metrics_path, index=False)
+
+    logging.info(f"ARIMA training complete. Results saved to: {metrics_path}")
+
+
+if __name__ == "__main__":
+    main()

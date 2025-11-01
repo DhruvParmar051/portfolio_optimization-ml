@@ -13,6 +13,7 @@ plotly
 scikit-learn
 scipy
 pulp
+statsmodels
 
 jupyterlab 
 ipykernel
