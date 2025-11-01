@@ -43,9 +43,35 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+<<<<<<< HEAD
 # ===========================================================
 # Helper Functions
 # ===========================================================
+=======
+# ======================================================================
+# File Paths
+# ======================================================================
+
+INPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
+OUTPUT_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
+
+# ======================================================================
+# Core Functions
+# ======================================================================
+
+def load_data(path: str) -> pd.DataFrame:
+    """
+    Load the engineered dataset from parquet file.
+    """
+    if not os.path.exists(path):
+        logging.error(f"File not found: {path}")
+        raise FileNotFoundError(f"Input file not found at {path}")
+
+    df = pd.read_parquet(path)
+    logging.info(f"Loaded engineered dataset successfully. Shape: {df.shape}")
+    return df
+
+>>>>>>> bf7b3c2 (Abbhi bahut kuch kiya hai)
 
 def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     """Fill missing values for both numeric and categorical columns."""
@@ -122,10 +148,23 @@ def reduce_memory(df: pd.DataFrame) -> pd.DataFrame:
 # ===========================================================
 
 def preprocessor():
-    df = pd.read_parquet(INPUT_PATH)
-    df = handle_missing(df)
-    df = encode_categoricals(df)
-    df = scale(df)
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    df.to_parquet(OUTPUT_PATH, index=False)
-    logging.info(f"Preprocessing complete. Shape: {df.shape}")
+    """Run the complete preprocessing pipeline."""
+    try:
+        logging.info("Loading featured dataset...")
+        df = pd.read_parquet(INPUT_PATH)
+        logging.info(f"Initial dataset shape: {df.shape}")
+
+        df = handle_missing_values(df)
+        df = encode_categoricals(df)
+        df = scale_numeric_features(df)
+        df = reduce_memory(df)
+
+        # Save processed dataset
+        os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+        df.to_parquet(OUTPUT_PATH, index=False)
+
+        logging.info(f"Preprocessing complete. Final shape: {df.shape}")
+        logging.info(f"Saved preprocessed dataset → {OUTPUT_PATH}")
+
+    except Exception as e:
+        logging.exception(f"Preprocessing failed: {e}")

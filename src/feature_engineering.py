@@ -1,6 +1,7 @@
 """
 feature_engineering.py
 
+<<<<<<< HEAD
 Generates advanced time-series features for stock-level modeling.
 Includes rolling statistics, momentum, volatility, lagged features,
 and sector-level contextual signals.
@@ -118,13 +119,26 @@ def reduce_memory(df: pd.DataFrame) -> pd.DataFrame:
 # ===========================================================
 
 def feature_engineering():
-    df = pd.read_parquet(INPUT_PATH)
-    df = create_stock_features(df)
-    df = create_sector_features(df)
-    df = create_targets(df)
-    df = df.dropna(subset=["Close"])
-    if df.empty:
-        logging.warning("Warning: resulting dataset is empty. Check rolling windows or missing data.")
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    df.to_parquet(OUTPUT_PATH, index=False)
-    logging.info(f"Feature engineering completed. Final shape: {df.shape}")
+    """Run complete feature engineering pipeline."""
+    try:
+        logging.info("Loading cleaned dataset...")
+        df = pd.read_parquet(INPUT_PATH)
+        logging.info(f"Loaded data shape: {df.shape}")
+
+        df = compute_basic_returns(df)
+        df = add_rolling_features(df, long_window=750)
+        df = add_sector_features(df)
+        df = add_lag_features(df)
+        df = create_target(df)
+        df = reduce_memory(df)
+
+        df = df.dropna(subset=["Daily_Return", "Close", "Sector", "Stock"])
+        df = df.sort_values(["Stock", "Date"]).reset_index(drop=True)
+
+        df.to_parquet(OUTPUT_PATH, index=False)
+        logging.info(f"Feature engineering completed successfully → {OUTPUT_PATH}")
+        logging.info(f"Final dataset shape: {df.shape}")
+
+    except Exception as e:
+        logging.exception(f"Feature engineering failed: {e}")
+

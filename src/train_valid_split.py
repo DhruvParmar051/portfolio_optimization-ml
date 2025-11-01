@@ -1,6 +1,7 @@
 """
 train_valid_split.py
 
+<<<<<<< HEAD
 Performs a chronological train–validation split for preprocessed S&P 500 data.
 
 Steps:
@@ -82,3 +83,9 @@ def train_valid_split(valid_ratio: float = 0.2):
         logging.info("Train-validation split pipeline completed successfully.")
     except Exception as e:
         logging.exception("Train-validation split pipeline failed.")
+=======
+        logging.exception("Splitting pipeline failed.")
+
+if __name__ == "__main__":
+    train_valid_split()
+>>>>>>> c97fbfd (Kuch to kiya hai)
