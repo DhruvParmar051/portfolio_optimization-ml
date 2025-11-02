@@ -1,165 +1,158 @@
 """
 optimize_portfolio.py
 
-Performs portfolio optimization based on ARIMA forecasted returns.
+Mean-variance portfolio optimization using ARIMA model forecasts.
 
-Pipeline Steps:
-1. Load ARIMA forecast results per stock
-2. Merge forecasts into a daily forecast matrix
-3. Estimate expected returns and covariance
-4. Solve for optimal weights using mean–variance optimization
-5. Backtest portfolio returns and compute performance metrics
+Steps:
+1. Load forecasted prices from ARIMA expanding-window results.
+2. Compute expected returns & covariance matrix.
+3. Optimize portfolio weights to maximize the Sharpe ratio.
+4. Save optimized weights & summary metrics.
 
 Author: Dhruv
 Date: 2025-11-02
 """
 
-# ======================================================================
+# ============================================================
 # Imports
-# ======================================================================
+# ============================================================
 
 import os
 import numpy as np
 import pandas as pd
 import logging
-import warnings
 from scipy.optimize import minimize
 
-warnings.filterwarnings("ignore")
+# ============================================================
+# Configuration
+# ============================================================
+
+PREDICTIONS_DIR = os.path.join(os.getcwd(), "models", "arima_expanding")
+RESULTS_DIR = os.path.join(os.getcwd(), "results")
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+RISK_FREE_RATE = 0.0  # daily risk-free rate
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# ======================================================================
-# Paths
-# ======================================================================
+# ============================================================
+# Utility Functions
+# ============================================================
 
-FORECAST_DIR = os.path.join(os.getcwd(), "models", "arima_expanding")
-OUTPUT_DIR = os.path.join(os.getcwd(), "results", "portfolio")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# ======================================================================
-# Portfolio Optimization Core
-# ======================================================================
-
-def load_forecasts() -> pd.DataFrame:
-    """Load all ARIMA forecast parquet files into a unified DataFrame."""
+def load_forecasts():
+    """Load all ARIMA forecast parquet files."""
     logging.info("Loading ARIMA forecast files...")
-    records = []
-    for file in os.listdir(FORECAST_DIR):
-        if file.endswith("_forecasts.parquet"):
-            stock = file.replace("_forecasts.parquet", "")
-            df = pd.read_parquet(os.path.join(FORECAST_DIR, file))
-            df["Stock"] = stock
-            records.append(df)
-    if not records:
-        raise FileNotFoundError("No ARIMA forecast files found.")
-    forecasts = pd.concat(records, ignore_index=True)
-    forecasts["Date"] = pd.to_datetime(forecasts["Date"])
-    logging.info(f"Loaded forecasts for {forecasts['Stock'].nunique()} stocks.")
-    return forecasts
+
+    all_files = [
+        os.path.join(PREDICTIONS_DIR, f)
+        for f in os.listdir(PREDICTIONS_DIR)
+        if f.endswith("_forecasts.parquet")
+    ]
+
+    if not all_files:
+        raise RuntimeError("No forecast files found.")
+
+    df = pd.concat([pd.read_parquet(f) for f in all_files], ignore_index=True)
+    logging.info(f"Loaded forecasts: {df.shape}")
+    return df
 
 
-def pivot_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Convert long-format forecasts into wide-format (Date x Stock)."""
-    pivoted = forecasts.pivot(index="Date", columns="Stock", values="Forecast").sort_index()
-    pivoted = pivoted.fillna(method="ffill").dropna(how="all")
-    return pivoted
+def compute_expected_returns(forecasts_df: pd.DataFrame):
+    """Compute mean returns and covariance from ARIMA forecasts."""
+    logging.info("Computing expected returns and covariance...")
+
+    forecasts_df = forecasts_df.sort_values(["Stock", "Date"]).drop_duplicates(subset=["Stock", "Date"])
+
+    pivot = forecasts_df.pivot(index="Date", columns="Stock", values="Forecast")
+
+    # convert to daily percentage returns
+    returns = pivot.pct_change(fill_method=None).dropna(how="all")
+
+    # remove bad stocks
+    valid_stocks = returns.columns[returns.isna().mean() < 0.1]
+    returns = returns[valid_stocks].fillna(0)
+
+    mean_returns = returns.mean()
+    cov_matrix = returns.cov()
+
+    logging.info(f"Computed expected returns for {len(mean_returns)} stocks.")
+    logging.info(f"Covariance matrix shape: {cov_matrix.shape}")
+
+    return mean_returns, cov_matrix
 
 
-def calculate_expected_returns(forecast_prices: pd.DataFrame) -> pd.DataFrame:
-    """Compute daily forecasted returns from forecasted prices."""
-    returns = forecast_prices.pct_change().dropna(how="all")
-    return returns
+def portfolio_performance(weights, mean_returns, cov_matrix, risk_free_rate):
+    """Compute portfolio metrics (return, volatility, Sharpe)."""
+    portfolio_return = np.dot(weights, mean_returns)
+    portfolio_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+    sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_vol if portfolio_vol > 0 else 0
+    return portfolio_return, portfolio_vol, sharpe_ratio
 
 
-def mean_variance_opt(expected_returns: pd.Series, cov_matrix: pd.DataFrame):
-    """Solve mean-variance optimization for maximum Sharpe ratio portfolio."""
-    n = len(expected_returns)
-    init_w = np.ones(n) / n
+def optimize_portfolio(mean_returns, cov_matrix, risk_free_rate=0.0):
+    """Optimize portfolio for maximum Sharpe ratio."""
+    logging.info("Optimizing portfolio...")
 
-    def portfolio_stats(weights):
-        ret = np.dot(weights, expected_returns)
-        vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        return ret, vol, ret / vol
+    n = len(mean_returns)
+    args = (mean_returns, cov_matrix, risk_free_rate)
 
-    def neg_sharpe(weights):
-        _, _, sharpe = portfolio_stats(weights)
-        return -sharpe
+    # constraints: sum(weights) = 1
+    constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
+    bounds = tuple((0, 0.05) for _ in range(n))  # cap any stock ≤5%
 
-    constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
-    bounds = tuple((0, 1) for _ in range(n))
+    result = minimize(
+        lambda w: -portfolio_performance(w, *args)[2],  # maximize Sharpe
+        x0=np.ones(n) / n,
+        bounds=bounds,
+        constraints=constraints,
+        method='SLSQP',
+        options={'maxiter': 500, 'ftol': 1e-9}
+    )
 
-    result = minimize(neg_sharpe, init_w, bounds=bounds, constraints=constraints)
     if not result.success:
-        logging.warning("Optimization failed; returning equal weights.")
-        return init_w
+        logging.warning(f"Optimization failed: {result.message}")
+
     return result.x
 
 
-def backtest_portfolio(forecast_returns: pd.DataFrame, window: int = 30):
-    """
-    Rolling backtest with periodic rebalancing.
+def save_results(weights, mean_returns, cov_matrix):
+    """Save optimized portfolio weights and performance summary."""
+    weights_df = pd.DataFrame({
+        "Stock": mean_returns.index,
+        "Weight": weights
+    }).sort_values(by="Weight", ascending=False)
 
-    Parameters:
-        forecast_returns: DataFrame of forecasted returns (Date x Stock)
-        window: rebalancing frequency (days)
-    """
-    weights_record = []
-    portfolio_returns = []
+    weights_path = os.path.join(RESULTS_DIR, "optimized_weights.csv")
+    weights_df.to_csv(weights_path, index=False)
+    logging.info(f"Saved optimized weights -> {weights_path}")
 
-    for i in range(window, len(forecast_returns)):
-        hist = forecast_returns.iloc[i-window:i]
-        mu = hist.mean()
-        cov = hist.cov()
-        w_opt = mean_variance_opt(mu, cov)
-        weights_record.append(w_opt)
+    port_return, port_vol, sharpe = portfolio_performance(weights, mean_returns, cov_matrix, RISK_FREE_RATE)
+    daily_sharpe = sharpe
+    annualized_sharpe = sharpe * np.sqrt(252)
 
-        next_ret = forecast_returns.iloc[i].fillna(0)
-        portfolio_ret = np.dot(w_opt, next_ret)
-        portfolio_returns.append(portfolio_ret)
+    summary = pd.DataFrame([{
+        "Expected_Return": port_return,
+        "Volatility": port_vol,
+        "Sharpe_Ratio_Daily": daily_sharpe,
+        "Sharpe_Ratio_Annualized": annualized_sharpe
+    }])
 
-    weights_record = np.array(weights_record)
-    portfolio_series = pd.Series(portfolio_returns, index=forecast_returns.index[window:])
+    summary_path = os.path.join(RESULTS_DIR, "portfolio_summary.csv")
+    summary.to_csv(summary_path, index=False)
+    logging.info(f"Saved portfolio summary -> {summary_path}")
 
-    logging.info("Backtest completed.")
-    return portfolio_series, weights_record
-
-
-def evaluate_performance(portfolio_returns: pd.Series):
-    """Compute key portfolio performance metrics."""
-    cumulative = (1 + portfolio_returns).cumprod()
-    ann_return = (cumulative.iloc[-1]) ** (252 / len(portfolio_returns)) - 1
-    ann_vol = portfolio_returns.std() * np.sqrt(252)
-    sharpe = ann_return / ann_vol if ann_vol > 0 else np.nan
-
-    summary = {
-        "Cumulative Return": cumulative.iloc[-1] - 1,
-        "Annualized Return": ann_return,
-        "Annualized Volatility": ann_vol,
-        "Sharpe Ratio": sharpe
-    }
-    logging.info(f"Performance: {summary}")
-    return summary, cumulative
+    logging.info("=== Portfolio Optimization Complete ===")
+    print(summary.to_string(index=False))
 
 
-# ======================================================================
-# Entry Point
-# ======================================================================
+# ============================================================
+# Main
+# ============================================================
 
-def optimize_portfolio():
-    """Run portfolio optimization and backtesting."""
-    try:
-        forecasts = load_forecasts()
-        pivoted = pivot_forecasts(forecasts)
-        forecast_returns = calculate_expected_returns(pivoted)
+def portfolio_optimization():
+    logging.info("=== Running Portfolio Optimization ===")
 
-        portfolio_returns, weights = backtest_portfolio(forecast_returns, window=30)
-        summary, cumulative = evaluate_performance(portfolio_returns)
+    forecasts = load_forecasts()
+    mean_returns, cov_matrix = compute_expected_returns(forecasts)
+    weights = optimize_portfolio(mean_returns, cov_matrix)
+    save_results(weights, mean_returns, cov_matrix)
 
-        cumulative.to_csv(os.path.join(OUTPUT_DIR, "portfolio_cumulative.csv"))
-        pd.DataFrame(weights).to_csv(os.path.join(OUTPUT_DIR, "portfolio_weights.csv"), index=False)
-
-        logging.info("Portfolio optimization completed successfully.")
-        logging.info(f"Results saved → {OUTPUT_DIR}")
-
-    except Exception as e:
-        logging.exception("Portfolio optimization pipeline failed.")

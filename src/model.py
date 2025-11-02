@@ -14,9 +14,6 @@ Optimizations:
 - Parallelized across stocks (via joblib)
 - Caches best (p,d,q) order per stock to avoid repeated grid search
 - Saves intermediate stock results to disk incrementally
-
-Author: Dhruv
-Date: 2025-11-02
 """
 
 # ============================================================
@@ -39,8 +36,9 @@ warnings.filterwarnings("ignore")
 # ============================================================
 
 DATA_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
-MODEL_DIR = os.path.join(os.getcwd(), "models", "arima_expanding")
-os.makedirs(MODEL_DIR, exist_ok=True)
+OUTPUT_DIR = os.path.join(os.getcwd(), "models")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_PATH = os.path.join(OUTPUT_DIR, "arima_expanding")
 
 ROLLING_START = 750           # initial expanding window length
 FORECAST_HORIZON = 30         # forecast next 30 days
