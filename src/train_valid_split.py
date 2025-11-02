@@ -1,13 +1,27 @@
 """
 train_valid_split.py
 
-Splits preprocessed S&P 500 dataset into unified chronological
-train/validation sets for model training.
+Performs a chronological train–validation split for preprocessed S&P 500 data.
+
+Steps:
+1. Load preprocessed dataset
+2. Sort data chronologically
+3. Split based on `valid_ratio`
+4. Save train and validation sets as parquet files
 """
 
-import os, pandas as pd, logging
+import os
+import pandas as pd
+import logging
+
+# ======================================================================
+# Logging Configuration
+# ======================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# ======================================================================
+# File Paths
+# ======================================================================
 INPUT_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
 OUTPUT_DIR = os.path.join(os.getcwd(), "data", "splits")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -26,4 +40,4 @@ def train_valid_split(valid_ratio=0.2):
     X_val.to_parquet(os.path.join(OUTPUT_DIR, "X_val.parquet"), index=False)
     y_val.to_frame("target").to_parquet(os.path.join(OUTPUT_DIR, "y_val.parquet"), index=False)
 
-    logging.info(f"✅ Train={len(X_train)}, Val={len(X_val)} saved to {OUTPUT_DIR}")
+    logging.info(f"Train={len(X_train)}, Val={len(X_val)} saved to {OUTPUT_DIR}")

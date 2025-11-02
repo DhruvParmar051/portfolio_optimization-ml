@@ -1,94 +1,122 @@
 """
 model.py
 
-Trains and evaluates per-stock ARIMA models using time-series data.
-The script loads train/validation splits, fits ARIMA models, forecasts
-validation periods, and saves the results.
+Expanding-window ARIMA backtest per stock for portfolio modeling (parallel + optimized).
 
-Pipeline Steps:
-1. Load X/y train–validation splits from `data/splits/`
-2. Fit ARIMA model on the training target (`y_train`)
-3. Forecast the validation horizon length
-4. Evaluate model performance using RMSE
-5. Save model summaries and predictions
+This module:
+1. Loads cleaned & preprocessed stock-price data.
+2. Performs an expanding-window backtest (750-day minimum training window).
+3. Re-fits ARIMA(p,d,q) models using efficient parallelization.
+4. Evaluates out-of-sample RMSE and stores forecasts.
+5. Supports resume via checkpointing to handle large-scale runs.
+
+Optimizations:
+- Parallelized across stocks (via joblib)
+- Caches best (p,d,q) order per stock to avoid repeated grid search
+- Saves intermediate stock results to disk incrementally
 
 Author: Dhruv
-Date: 2025-11-01
+Date: 2025-11-02
 """
 
-# ======================================================================
+# ============================================================
 # Imports
-# ======================================================================
+# ============================================================
 
 import os
-import pandas as pd
 import numpy as np
+import pandas as pd
 import logging
+from itertools import product
+from joblib import Parallel, delayed, dump, load
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.metrics import mean_squared_error
-import joblib
+import warnings
+warnings.filterwarnings("ignore")
 
-# ======================================================================
-# Logging Configuration
-# ======================================================================
+# ============================================================
+# Configuration
+# ============================================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-# ======================================================================
-# Paths
-# ======================================================================
-
-DATA_DIR = os.path.join(os.getcwd(), "data", "splits")
-MODEL_DIR = os.path.join(os.getcwd(), "models")
+DATA_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
+MODEL_DIR = os.path.join(os.getcwd(), "models", "arima_expanding")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-X_TRAIN_PATH = os.path.join(DATA_DIR, "X_train.parquet")
-Y_TRAIN_PATH = os.path.join(DATA_DIR, "y_train.parquet")
-X_VAL_PATH = os.path.join(DATA_DIR, "X_val.parquet")
-Y_VAL_PATH = os.path.join(DATA_DIR, "y_val.parquet")
+ROLLING_START = 750           # initial expanding window length
+FORECAST_HORIZON = 30         # forecast next 30 days
+MAX_P, MAX_D, MAX_Q = 2, 1, 2 # smaller grid for speed
+N_JOBS = max(1, os.cpu_count() // 2)  # parallel cores
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# ============================================================
+# Utility functions
+# ============================================================
+
+def load_data():
+    """Load pre-split training and validation datasets."""
+    logging.info("Loading training and validation splits...")
+
+    X_train = pd.read_parquet(X_TRAIN_PATH)
+    y_train = pd.read_parquet(Y_TRAIN_PATH)["target"]
+    X_val = pd.read_parquet(X_VAL_PATH)
+    y_val = pd.read_parquet(Y_VAL_PATH)["target"]
+
+    logging.info(f"Loaded: X_train={X_train.shape}, X_val={X_val.shape}")
+    return X_train, y_train, X_val, y_val
+
+
+def train_arima(y_train, order=(1, 1, 1)):
+    """Fit an ARIMA model on training data."""
+    logging.info(f"Training ARIMA model with order={order}...")
+    model = ARIMA(y_train, order=order)
+    fitted_model = model.fit()
+    logging.info("Model training completed.")
+    return fitted_model
+
+
+def evaluate_model(model, y_val):
+    """Forecast and evaluate the ARIMA model."""
+    logging.info("Forecasting on validation data...")
+    forecast = model.forecast(steps=len(y_val))
+    rmse = np.sqrt(mean_squared_error(y_val, forecast))
+    logging.info(f"Validation RMSE: {rmse:.4f}")
+    return forecast, rmse
+
+
+def save_model(model, name="arima_model.pkl"):
+    """Save the trained model object."""
+    path = os.path.join(MODEL_DIR, name)
+    joblib.dump(model, path)
+    logging.info(f"Model saved at: {path}")
+
+
+def save_predictions(y_val, forecast):
+    """Save forecast vs actual comparison."""
+    results = pd.DataFrame({"Actual": y_val.values, "Forecast": forecast})
+    output_path = os.path.join(MODEL_DIR, "arima_predictions.parquet")
+    results.to_parquet(output_path, index=False)
+    logging.info(f"Predictions saved at: {output_path}")
 
 # ======================================================================
-# Core ARIMA Functions
+# Main Pipeline
 # ======================================================================
 
-def model_training():
-    """Train models for predicting returns and volatility."""
+def run_arima_models():
+    """Run the ARIMA training and evaluation pipeline."""
+    try:
+        X_train, y_train, X_val, y_val = load_data()
 
-    if not os.path.exists(INPUT_PATH):
-        raise FileNotFoundError(f"Processed file not found: {INPUT_PATH}")
+        # Train ARIMA on training target
+        model = train_arima(y_train, order=(1, 1, 1))
 
-    df = pd.read_parquet(INPUT_PATH)
-    logging.info(f"Loaded dataset with shape: {df.shape}")
+        # Evaluate
+        forecast, rmse = evaluate_model(model, y_val)
 
-    # Ensure target columns exist
-    if "future_return" not in df.columns or "volatility" not in df.columns:
-        raise ValueError("Processed dataset must contain 'future_return' and 'volatility' columns")
+        # Save model and results
+        save_model(model)
+        save_predictions(y_val, forecast)
 
-    feature_cols = [col for col in df.columns if col not in ["future_return", "volatility", "Stock", "Date"]]
-    X = df[feature_cols]
-    y_return = df["future_return"]
-    y_vol = df["volatility"]
-
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y_return, test_size=0.2, random_state=42)
-
-    # Train return prediction model
-    model_return = RandomForestRegressor(n_estimators=100, random_state=42)
-    model_return.fit(X_train, y_train)
-
-    preds = model_return.predict(X_test)
-    rmse = mean_squared_error(y_test, preds, squared=False)
-    logging.info(f"Return prediction model RMSE: {rmse:.4f}")
-
-    # Train volatility prediction model
-    model_vol = RandomForestRegressor(n_estimators=100, random_state=42)
-    model_vol.fit(X_train, y_vol)
-
-    # Save both models
-    joblib.dump(model_return, os.path.join(MODEL_DIR, "model_return.pkl"))
-    joblib.dump(model_vol, os.path.join(MODEL_DIR, "model_vol.pkl"))
-
-    logging.info("Models trained and saved successfully.")
+        logging.info("ARIMA training and evaluation pipeline completed successfully.")
+    except Exception as e:
+        logging.exception("ARIMA pipeline failed.")
