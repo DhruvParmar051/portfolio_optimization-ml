@@ -22,7 +22,7 @@ from src.feature_engineering import feature_engineering
 from src.preprocessor import preprocessor
 from src.train_valid_split import train_valid_split
 from src.model import run_expanding_arima
-from src.optimize_portfolio import optimize_portfolio
+from src.optimize_portfolio import portfolio_optimization
 from src.reporting import generate_report
 
 # ======================================================================
@@ -57,7 +57,7 @@ def main():
         run_expanding_arima()
 
         logging.info("[7/8] Optimizing portfolio and backtesting...")
-        optimize_portfolio()
+        portfolio_optimization()
         logging.info("=== Pipeline executed successfully. ===")
 
         logging.info("[8/8] Generating visual report...")
