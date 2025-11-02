@@ -70,4 +70,4 @@ def data_fetch():
     raw = download_stock_data(tickers)
     merged = reshape_and_merge(raw, sp500)
     save_data(merged, RAW_DATA_PATH)
-    logging.info("✅ Data fetching complete.")
+    logging.info("Data fetching complete.")

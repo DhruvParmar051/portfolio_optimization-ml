@@ -49,4 +49,4 @@ def data_cleaning():
     df = analyze_missing(df)
     df = trim_invalid(df)
     save(df, OUTPUT_PATH)
-    logging.info("✅ Cleaning complete.")
+    logging.info("Cleaning complete.")

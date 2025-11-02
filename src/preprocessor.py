@@ -42,4 +42,4 @@ def preprocessor():
     df = scale(df)
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     df.to_parquet(OUTPUT_PATH, index=False)
-    logging.info(f"✅ Preprocessing complete. Shape: {df.shape}")
+    logging.info(f"Preprocessing complete. Shape: {df.shape}")

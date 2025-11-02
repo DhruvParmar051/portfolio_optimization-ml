@@ -26,4 +26,4 @@ def train_valid_split(valid_ratio=0.2):
     X_val.to_parquet(os.path.join(OUTPUT_DIR, "X_val.parquet"), index=False)
     y_val.to_frame("target").to_parquet(os.path.join(OUTPUT_DIR, "y_val.parquet"), index=False)
 
-    logging.info(f"✅ Train={len(X_train)}, Val={len(X_val)} saved to {OUTPUT_DIR}")
+    logging.info(f"Train={len(X_train)}, Val={len(X_val)} saved to {OUTPUT_DIR}")
