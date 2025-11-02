@@ -36,21 +36,10 @@ def scale(df):
 
 
 def preprocessor():
-    """
-    Run the preprocessing pipeline:
-      1. Load engineered data
-      2. Handle missing values
-      3. Encode categoricals
-      4. Scale numericals
-      5. Save processed output
-    """
-    try:
-        df = load_data(INPUT_PATH)
-        df = handle_missing_values(df)
-        df = encode_categorical(df)
-        df = scale_features(df, method="standard")
-        save_data(df, OUTPUT_PATH)
-        logging.info("Preprocessing completed successfully.")
-    except Exception as e:
-        logging.exception("Preprocessing failed due to an unexpected error.")
-
+    df = pd.read_parquet(INPUT_PATH)
+    df = handle_missing(df)
+    df = encode_categoricals(df)
+    df = scale(df)
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    df.to_parquet(OUTPUT_PATH, index=False)
+    logging.info(f"✅ Preprocessing complete. Shape: {df.shape}")
