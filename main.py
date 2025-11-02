@@ -1,13 +1,18 @@
 """
 main.py
 
-Runs the complete portfolio optimization pipeline:
-1. Data fetching
-2. Cleaning
-3. Feature engineering
-4. Preprocessing
-5. Train-validation split
-6. ARIMA forecasting per stock
+Master pipeline runner for S&P 500 portfolio modeling with ARIMA-based forecasting.
+
+Pipeline Steps:
+1. Fetch raw S&P 500 data
+2. Clean and validate data
+3. Perform feature engineering
+4. Preprocess (scaling, encoding)
+5. Create chronological train-validation splits
+6. Run expanding-window ARIMA modeling for backtesting
+
+Author: Dhruv
+Date: 2025-11-02
 """
 
 import logging
@@ -16,37 +21,54 @@ from src.data_cleaning import data_cleaning
 from src.feature_engineering import feature_engineering
 from src.preprocessor import preprocessor
 from src.train_valid_split import train_valid_split
-from src.model import run_arima_models  # updated import
+from src.model import run_expanding_arima
+from src.optimize_portfolio import optimize_portfolio
+from src.reporting import generate_report
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# ======================================================================
+# Logging Configuration
+# ======================================================================
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-
+# ======================================================================
+# Main Execution
+# ======================================================================
 def main():
-    logging.info("Starting Portfolio Optimization Pipeline")
+    """Run the complete portfolio optimization pipeline."""
+    try:
+        logging.info("=== Starting Portfolio Modeling Pipeline ===")
 
-    logging.info("[1/6] Fetching stock data...")
-    data_fetch()
+        logging.info("[1/8] Fetching raw data...")
+        data_fetch()
 
-    logging.info("[2/6] Cleaning data...")
-    data_cleaning()
+        logging.info("[2/8] Cleaning data...")
+        data_cleaning()
 
-    logging.info("[3/6] Feature engineering...")
-    feature_engineering()
+        logging.info("[3/8] Feature engineering...")
+        feature_engineering()
 
-    logging.info("[4/6] Preprocessing data...")
-    preprocessor()
+        logging.info("[4/8] Preprocessing...")
+        preprocessor()
 
-    logging.info("[5/6] Creating train-validation splits...")
-    train_valid_split(valid_ratio=0.2)
+        logging.info("[5/8] Creating train-validation splits...")
+        train_valid_split(valid_ratio=0.2)
 
-    logging.info("[6/6] Running ARIMA models for each stock...")
-    run_arima_models()
+        logging.info("[6/8] Running expanding-window ARIMA models...")
+        run_expanding_arima()
 
-    logging.info("Pipeline completed successfully!")
+        logging.info("[7/8] Optimizing portfolio and backtesting...")
+        optimize_portfolio()
+        logging.info("=== Pipeline executed successfully. ===")
+
+        logging.info("[8/8] Generating visual report...")
+        generate_report()
+        
+    except Exception as e:
+        logging.exception("Pipeline execution failed.")
 
 
+# ======================================================================
+# Entry Point
+# ======================================================================
 if __name__ == "__main__":
     main()
