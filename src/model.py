@@ -36,9 +36,9 @@ warnings.filterwarnings("ignore")
 # ============================================================
 
 DATA_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
-OUTPUT_DIR = os.path.join(os.getcwd(), "models")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-OUTPUT_PATH = os.path.join(OUTPUT_DIR, "arima_expanding")
+MODEL_DIR = os.path.join(os.getcwd(), "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
+OUTPUT_PATH = os.path.join(MODEL_DIR, "arima_expanding")
 
 ROLLING_START = 750           # initial expanding window length
 FORECAST_HORIZON = 30         # forecast next 30 days
