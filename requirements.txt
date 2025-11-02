@@ -13,6 +13,7 @@ plotly
 scikit-learn
 scipy
 pulp
+statsmodels
 
 jupyterlab 
 ipykernel
@@ -21,6 +22,3 @@ pyarrow
 fastparquet
 missingno
 lxml
-
-google 
-protobuf
