@@ -1,74 +1,75 @@
+
 """
 main.py
 
-This is the main controller script that runs the entire ML data pipeline.
-It orchestrates all stages — from data fetching to preprocessing — in order.
+Master pipeline runner for S&P 500 portfolio modeling with ARIMA-based forecasting.
 
-Each step is defined in a separate module under 'src/', and each module
-has a dedicated function with the same name as the file (for example,
-`data_cleaning()` inside data_cleaning.py).
+Pipeline Steps:
+1. Fetch raw S&P 500 data
+2. Clean and validate data
+3. Perform feature engineering
+4. Preprocess (scaling, encoding)
+5. Create chronological train-validation splits
+6. Run expanding-window ARIMA modeling for backtesting
 
-Pipeline Order:
-1. Data Fetching
-2. Data Cleaning
-3. Feature Engineering
-4. Preprocessing
-
+Author: Dhruv
+Date: 2025-11-02
 """
-
-# ======================================================================
-# Imports
-# ======================================================================
 
 import logging
 from src.data_fetch import data_fetch
 from src.data_cleaning import data_cleaning
 from src.feature_engineering import feature_engineering
 from src.preprocessor import preprocessor
+from src.train_valid_split import train_valid_split
+from src.model import run_expanding_arima
+from src.optimize_portfolio import portfolio_optimization
+from src.reporting import generate_report
+
 # ======================================================================
 # Logging Configuration
 # ======================================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()]
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # ======================================================================
-# Main Orchestrator
+# Main Execution
 # ======================================================================
-
-def run_pipeline():
-    """Run the entire ML data pipeline sequentially."""
-    logging.info("=" * 70)
-    logging.info("🚀 Starting End-to-End ML Pipeline Execution")
-    logging.info("=" * 70)
-
+def main():
+    """Run the complete portfolio optimization pipeline."""
     try:
-        # 1️⃣ Fetch Data
-        logging.info("\n--- [1/4] Fetching Raw Data ---")
-        data_fetch()
+        logging.info("=== Starting Portfolio Modeling Pipeline ===")
 
-        # 2️⃣ Clean Data
-        logging.info("\n--- [2/4] Cleaning Data ---")
-        data_cleaning()
+        logging.info("[1/8] Fetching raw data...")
+        # data_fetch()
 
-        # 3️⃣ Feature Engineering
-        logging.info("\n--- [3/4] Generating Features ---")
-        feature_engineering()
+        logging.info("[2/8] Cleaning data...")
+        # data_cleaning()
 
-        # 4️⃣ Preprocessing
-        logging.info("\n--- [4/4] Running Preprocessor ---")
-        preprocessor()
+        logging.info("[3/8] Feature engineering...")
+        # feature_engineering()
 
-        logging.info("\n✅ Pipeline completed successfully.")
+        logging.info("[4/8] Preprocessing...")
+        # preprocessor()
+
+        logging.info("[5/8] Creating train-validation splits...")
+        # train_valid_split(valid_ratio=0.2)
+
+        logging.info("[6/8] Running expanding-window ARIMA models...")
+        # run_expanding_arima()
+
+        logging.info("[7/8] Optimizing portfolio and backtesting...")
+        portfolio_optimization()
+        logging.info("=== Pipeline executed successfully. ===")
+
+        logging.info("[8/8] Generating visual report...")
+        # generate_report()
+        
     except Exception as e:
-        logging.exception("❌ Pipeline failed due to an unexpected error.")
+        logging.exception("Pipeline execution failed.")
+
 
 # ======================================================================
 # Entry Point
 # ======================================================================
-
 if __name__ == "__main__":
     main()

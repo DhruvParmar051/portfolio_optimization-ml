@@ -1,8 +1,6 @@
 """
 model.py
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 Expanding-window ARIMA backtest per stock for portfolio modeling (parallel + optimized).
 
 This module:
@@ -21,34 +19,9 @@ Optimizations:
 # ============================================================
 # Imports
 # ============================================================
-=======
-This module defines and trains an ARIMA model for time-series forecasting
-on each stock’s adjusted closing prices.
-=======
-Trains and evaluates per-stock ARIMA models using time-series data.
-The script loads train/validation splits, fits ARIMA models, forecasts
-validation periods, and saves the results.
->>>>>>> 9f88a9c (Model dala hai guyysss)
-
-Pipeline Steps:
-1. Load X/y train–validation splits from `data/splits/`
-2. Fit ARIMA model on the training target (`y_train`)
-3. Forecast the validation horizon length
-4. Evaluate model performance using RMSE
-5. Save model summaries and predictions
-
-Author: Dhruv
-Date: 2025-11-01
-"""
->>>>>>> c97fbfd (Kuch to kiya hai)
-
-# ======================================================================
-# Imports
-# ======================================================================
 
 import os
 import numpy as np
-<<<<<<< HEAD
 import pandas as pd
 import logging
 from itertools import product
@@ -63,9 +36,8 @@ warnings.filterwarnings("ignore")
 # ============================================================
 
 DATA_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
-OUTPUT_DIR = os.path.join(os.getcwd(), "models")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-OUTPUT_PATH = os.path.join(OUTPUT_DIR, "arima_expanding")
+MODEL_DIR = os.path.join(os.getcwd(), "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
 
 ROLLING_START = 750           # initial expanding window length
 FORECAST_HORIZON = 30         # forecast next 30 days
@@ -78,26 +50,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 # Utility functions
 # ============================================================
 
-def load_data():
-    """Load pre-split training and validation datasets."""
-    logging.info("Loading training and validation splits...")
-
-    X_train = pd.read_parquet(X_TRAIN_PATH)
-    y_train = pd.read_parquet(Y_TRAIN_PATH)["target"]
-    X_val = pd.read_parquet(X_VAL_PATH)
-    y_val = pd.read_parquet(Y_VAL_PATH)["target"]
-
-    logging.info(f"Loaded: X_train={X_train.shape}, X_val={X_val.shape}")
-    return X_train, y_train, X_val, y_val
-
-
-def train_arima(y_train, order=(1, 1, 1)):
-    """Fit an ARIMA model on training data."""
-    logging.info(f"Training ARIMA model with order={order}...")
-    model = ARIMA(y_train, order=order)
-    fitted_model = model.fit()
-    logging.info("Model training completed.")
-    return fitted_model
+def select_best_order(y_train, cache_path=None):
+    """
+    Select ARIMA(p,d,q) order minimizing AIC.
+    Uses cache if available to avoid recomputation.
+    """
+    if cache_path and os.path.exists(cache_path):
+        return load(cache_path)
+    best_aic = np.inf
+    best_order = (1, 0, 0)
+    for p, d, q in product(range(MAX_P + 1), range(MAX_D + 1), range(MAX_Q + 1)):
+        try:
+            model = ARIMA(y_train, order=(p, d, q))
+            res = model.fit()
+            if res.aic < best_aic:
+                best_aic = res.aic
+                best_order = (p, d, q)
+        except Exception:
+            continue
+    if cache_path:
+        dump(best_order, cache_path)
+    return best_order
 
 
 def expanding_window_forecast(stock, df_stock):
@@ -200,81 +173,3 @@ def run_expanding_arima():
     logging.info(f"Expanding-window ARIMA complete.")
     logging.info(f"Forecasts saved → {forecasts_path}")
     logging.info(f"Summary saved → {summary_path}")
-=======
-import logging
-from statsmodels.tsa.arima.model import ARIMA
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# Paths
-DATA_DIR = os.path.join(os.getcwd(), "data", "processed_data")
-MODEL_OUTPUT_DIR = os.path.join(os.getcwd(), "models")
-os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
-
-
-def fit_arima_per_stock(train_df, valid_df, order=(1, 1, 1)):
-    """
-    Fits an ARIMA model for each stock and evaluates performance.
-
-    Args:
-        train_df (pd.DataFrame): training dataset with columns ['Date', 'Ticker', 'Adj Close']
-        valid_df (pd.DataFrame): validation dataset
-        order (tuple): ARIMA order (p, d, q)
-
-    Returns:
-        pd.DataFrame: results with metrics per stock
-    """
-    results = []
-
-    tickers = train_df["Ticker"].unique()
-    for ticker in tickers:
-        logging.info(f"Training ARIMA{order} for {ticker}...")
-
-        train_data = train_df[train_df["Ticker"] == ticker].sort_values("Date")
-        valid_data = valid_df[valid_df["Ticker"] == ticker].sort_values("Date")
-
-        try:
-            model = ARIMA(train_data["Adj Close"], order=order)
-            model_fit = model.fit()
-            forecast = model_fit.forecast(steps=len(valid_data))
-
-            mae = mean_absolute_error(valid_data["Adj Close"], forecast)
-            rmse = np.sqrt(mean_squared_error(valid_data["Adj Close"], forecast))
-
-            results.append({
-                "Ticker": ticker,
-                "MAE": mae,
-                "RMSE": rmse
-            })
-
-            # Save model summary
-            with open(os.path.join(MODEL_OUTPUT_DIR, f"{ticker}_arima_summary.txt"), "w") as f:
-                f.write(str(model_fit.summary()))
-
-        except Exception as e:
-            logging.error(f"ARIMA failed for {ticker}: {e}")
-
-    return pd.DataFrame(results)
-
-
-def main():
-    logging.info("Loading training and validation datasets...")
-    train_path = os.path.join(DATA_DIR, "train.parquet")
-    valid_path = os.path.join(DATA_DIR, "valid.parquet")
-
-    train_df = pd.read_parquet(train_path)
-    valid_df = pd.read_parquet(valid_path)
-
-    logging.info("Fitting ARIMA models per stock...")
-    metrics_df = fit_arima_per_stock(train_df, valid_df, order=(1, 1, 1))
-
-    metrics_path = os.path.join(MODEL_OUTPUT_DIR, "arima_results.csv")
-    metrics_df.to_csv(metrics_path, index=False)
-
-    logging.info(f"ARIMA training complete. Results saved to: {metrics_path}")
-
-
-if __name__ == "__main__":
-    main()
->>>>>>> c97fbfd (Kuch to kiya hai)

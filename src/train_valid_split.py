@@ -1,7 +1,6 @@
 """
 train_valid_split.py
 
-<<<<<<< HEAD
 Performs a chronological train–validation split for preprocessed S&P 500 data.
 
 Steps:
@@ -20,19 +19,10 @@ import logging
 # ======================================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-<<<<<<< HEAD
 # ======================================================================
 # File Paths
 # ======================================================================
 INPUT_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
-=======
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-INPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned_data", "cleaned_data.parquet")
->>>>>>> c97fbfd (Kuch to kiya hai)
 OUTPUT_DIR = os.path.join(os.getcwd(), "data", "splits")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -83,9 +73,3 @@ def train_valid_split(valid_ratio: float = 0.2):
         logging.info("Train-validation split pipeline completed successfully.")
     except Exception as e:
         logging.exception("Train-validation split pipeline failed.")
-=======
-        logging.exception("Splitting pipeline failed.")
-
-if __name__ == "__main__":
-    train_valid_split()
->>>>>>> c97fbfd (Kuch to kiya hai)

@@ -1,132 +1,126 @@
 """
 preprocessor.py
 
-This module prepares the engineered dataset for modeling.
-It handles scaling, encoding, and other transformations to make sure
-the features are clean, consistent, and ready for the machine learning model.
+Production-level preprocessing module for stock-level and sector-level features.
 
-Pipeline Steps:
-1. Load engineered data
-2. Handle missing values and outliers
-3. Encode categorical variables
-4. Scale numerical features
-5. Save preprocessed data for model training
-
-Author: Dhruv
-Date: 2025-10-31
+Responsibilities:
+1. Handle missing values in numeric and categorical columns.
+2. Encode selected categorical variables (Sector, Industry) using one-hot encoding.
+3. Scale numeric features with StandardScaler.
+4. Persist preprocessing artifacts (scaler and metadata) for reproducibility.
+5. Save preprocessed dataset ready for model training.
 """
 
-# ======================================================================
+# ===========================================================
 # Imports
-# ======================================================================
+# ===========================================================
 
 import os
 import logging
+import joblib
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 
-# ======================================================================
-# Logging Configuration
-# ======================================================================
+# ===========================================================
+# Configuration
+# ===========================================================
+
+INPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
+OUTPUT_DIR = os.path.join(os.getcwd(), "data", "preprocessed_data")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_PATH = os.path.join(OUTPUT_DIR, "preprocessed_data.parquet")
+
+
+ARTIFACT_DIR = os.path.join(os.getcwd(), "artifacts", "preprocessing")
+os.makedirs(ARTIFACT_DIR, exist_ok=True)
+
+SCALER_PATH = os.path.join(ARTIFACT_DIR, "scaler.pkl")
+ENCODER_METADATA_PATH = os.path.join(ARTIFACT_DIR, "encoder_columns.pkl")
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()]
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-<<<<<<< HEAD
 # ===========================================================
 # Helper Functions
 # ===========================================================
-=======
-# ======================================================================
-# File Paths
-# ======================================================================
-
-INPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
-OUTPUT_PATH = os.path.join(os.getcwd(), "data", "preprocessed_data", "preprocessed_data.parquet")
-
-# ======================================================================
-# Core Functions
-# ======================================================================
-
-def load_data(path: str) -> pd.DataFrame:
-    """
-    Load the engineered dataset from parquet file.
-    """
-    if not os.path.exists(path):
-        logging.error(f"File not found: {path}")
-        raise FileNotFoundError(f"Input file not found at {path}")
-
-    df = pd.read_parquet(path)
-    logging.info(f"Loaded engineered dataset successfully. Shape: {df.shape}")
-    return df
-
->>>>>>> bf7b3c2 (Abbhi bahut kuch kiya hai)
 
 def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Fill or drop missing values depending on feature type.
-    """
-    # Fill numeric NaNs with median (more robust than mean)
-    num_cols = df.select_dtypes(include=[np.number]).columns
-    df[num_cols] = df[num_cols].fillna(df[num_cols].median())
+    """Fill missing values for both numeric and categorical columns."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
-    # Fill categorical NaNs with mode (most frequent value)
-    cat_cols = df.select_dtypes(exclude=[np.number]).columns
+    # Fill numeric columns with median (robust to outliers)
+    for col in num_cols:
+        median = df[col].median()
+        df[col].fillna(median, inplace=True)
+
+    # Fill categoricals with mode (most frequent)
     for col in cat_cols:
-        if df[col].isnull().any():
-            df[col] = df[col].fillna(df[col].mode()[0])
+        mode = df[col].mode()
+        if not mode.empty:
+            df[col].fillna(mode.iloc[0], inplace=True)
+        else:
+            df[col].fillna("Unknown", inplace=True)
 
-    logging.info("Handled missing values for numeric and categorical features.")
+    logging.info("Missing values handled successfully.")
     return df
 
 
-def encode_categorical(df: pd.DataFrame) -> pd.DataFrame:
+def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Encode categorical variables using LabelEncoder.
+    Encode 'Sector' and 'Industry' using one-hot encoding.
+    Persists encoder column list for consistency during inference.
     """
-    cat_cols = df.select_dtypes(exclude=[np.number]).columns
-    if len(cat_cols) == 0:
-        logging.info("No categorical columns found for encoding.")
+    encode_cols = [col for col in ["Sector", "Industry"] if col in df.columns]
+    if not encode_cols:
+        logging.warning("No categorical columns found for encoding.")
         return df
 
-    for col in cat_cols:
-        encoder = LabelEncoder()
-        df[col] = encoder.fit_transform(df[col].astype(str))
-        logging.info(f"Encoded column: {col}")
+    df_encoded = pd.get_dummies(df, columns=encode_cols, drop_first=True)
+    encoded_columns = df_encoded.columns.tolist()
 
-    return df
+    # Persist column list for future inference alignment
+    joblib.dump(encoded_columns, ENCODER_METADATA_PATH)
+    logging.info(f"Categoricals encoded: {encode_cols}. Saved metadata → {ENCODER_METADATA_PATH}")
+    return df_encoded
 
 
-def scale_features(df: pd.DataFrame, method: str = "standard") -> pd.DataFrame:
+def scale_numeric_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Scale numerical features using the specified method.
-    Options: 'standard' (z-score) or 'minmax' (0-1 scaling).
+    Standardize numeric features excluding identifiers and targets.
+    Saves the fitted scaler for reuse during inference.
     """
-    num_cols = df.select_dtypes(include=[np.number]).columns
-    scaler = StandardScaler() if method == "standard" else MinMaxScaler()
+    exclude = {"Date", "Stock", "Next_Return"}
+    num_cols = [col for col in df.select_dtypes(include=[np.number]).columns if col not in exclude]
 
+    if not num_cols:
+        logging.warning("No numeric features found to scale.")
+        return df
+
+    scaler = StandardScaler()
     df[num_cols] = scaler.fit_transform(df[num_cols])
-    logging.info(f"Scaled numerical features using {method} scaler.")
+
+    # Save fitted scaler
+    joblib.dump(scaler, SCALER_PATH)
+    logging.info(f"Numeric features scaled and scaler saved → {SCALER_PATH}")
     return df
 
 
-def save_data(df: pd.DataFrame, output_path: str) -> None:
-    """
-    Save the preprocessed dataset to parquet file.
-    """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    df.to_parquet(output_path, index=False)
-    logging.info(f"Saved preprocessed dataset at: {output_path}")
+def reduce_memory(df: pd.DataFrame) -> pd.DataFrame:
+    """Optimize numeric data types to reduce memory usage."""
+    for col in df.select_dtypes(include=["float", "int"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="float")
+    logging.info("Memory optimization complete.")
+    return df
 
 
-# ======================================================================
-# Main Pipeline
-# ======================================================================
- 
+# ===========================================================
+# Main Preprocessing Pipeline
+# ===========================================================
+
 def preprocessor():
     """Run the complete preprocessing pipeline."""
     try:
