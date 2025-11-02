@@ -27,7 +27,7 @@ from scipy.optimize import minimize
 # Configuration
 # ============================================================
 
-PREDICTIONS_DIR = os.path.join(os.getcwd(), "models", "arima_expanding")
+PREDICTIONS_DIR = os.path.join(os.getcwd(), "models")
 RESULTS_DIR = os.path.join(os.getcwd(), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 

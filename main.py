@@ -60,7 +60,7 @@ def main():
         portfolio_optimization()
         logging.info("=== Pipeline executed successfully. ===")
 
-        logging.info("[8/8] Generating visual report...")
+        logging.info("[8/8]Generating visual report...")
         generate_report()
         
     except Exception as e:
