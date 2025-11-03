@@ -1,144 +1,153 @@
 """
 preprocessor.py
 
-Production-level preprocessing module for stock-level and sector-level features.
-
-Responsibilities:
-1. Handle missing values in numeric and categorical columns.
-2. Encode selected categorical variables (Sector, Industry) using one-hot encoding.
-3. Scale numeric features with StandardScaler.
-4. Persist preprocessing artifacts (scaler and metadata) for reproducibility.
-5. Save preprocessed dataset ready for model training.
+Preprocesses cleaned and feature-engineered stock market data.
+Handles missing values, scaling, and encoding for both training and backtesting.
 """
-
-# ===========================================================
-# Imports
-# ===========================================================
 
 import os
 import logging
-import joblib
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+import joblib
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-# ===========================================================
-# Configuration
-# ===========================================================
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
-INPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
-OUTPUT_DIR = os.path.join(os.getcwd(), "data", "preprocessed_data")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-OUTPUT_PATH = os.path.join(OUTPUT_DIR, "preprocessed_data.parquet")
+# === File Paths ===
+FEATURED_TRAIN_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
+FEATURED_BACKTEST_PATH = os.path.join(os.getcwd(), "data", "backtest", "featured_data_backtest.parquet")
+PROCESSED_TRAIN_PATH = os.path.join(os.getcwd(), "data", "processed_data", "processed_data.parquet")
+PROCESSED_BACKTEST_PATH = os.path.join(os.getcwd(), "data", "backtest", "processed_data", "processed_data.parquet")
+SCALER_PATH = os.path.join(os.getcwd(), "models", "scaler.joblib")
+ENCODER_PATH = os.path.join(os.getcwd(), "models", "encoder.joblib")
 
-
-ARTIFACT_DIR = os.path.join(os.getcwd(), "artifacts", "preprocessing")
-os.makedirs(ARTIFACT_DIR, exist_ok=True)
-
-SCALER_PATH = os.path.join(ARTIFACT_DIR, "scaler.pkl")
-ENCODER_METADATA_PATH = os.path.join(ARTIFACT_DIR, "encoder_columns.pkl")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-# ===========================================================
-# Helper Functions
-# ===========================================================
+# === Utility Functions ===
 
 def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Fill missing values for both numeric and categorical columns."""
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    """Handle missing values by forward/backward filling and dropping residual NaNs."""
+    id_col = "Stock" if "Stock" in df.columns else "Symbol"
+    df = df.sort_values(by=[id_col, "Date"])
+    df = df.groupby(id_col).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
+    df = df.dropna()
+    logger.info("Missing values handled successfully.")
+    return df
+
+
+def encode_categorical_features(df: pd.DataFrame, training_mode: bool = True) -> pd.DataFrame:
+    """
+    Encode categorical variables (like Sector, Stock).
+    Saves encoder mappings during training; loads and applies during backtesting.
+    """
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
-
-    # Fill numeric columns with median (robust to outliers)
-    for col in num_cols:
-        median = df[col].median()
-        df[col].fillna(median, inplace=True)
-
-    # Fill categoricals with mode (most frequent)
-    for col in cat_cols:
-        mode = df[col].mode()
-        if not mode.empty:
-            df[col].fillna(mode.iloc[0], inplace=True)
-        else:
-            df[col].fillna("Unknown", inplace=True)
-
-    logging.info("Missing values handled successfully.")
-    return df
-
-
-def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Encode 'Sector' and 'Industry' using one-hot encoding.
-    Persists encoder column list for consistency during inference.
-    """
-    encode_cols = [col for col in ["Sector", "Industry"] if col in df.columns]
-    if not encode_cols:
-        logging.warning("No categorical columns found for encoding.")
+    if len(cat_cols) == 0:
         return df
 
-    df_encoded = pd.get_dummies(df, columns=encode_cols, drop_first=True)
-    encoded_columns = df_encoded.columns.tolist()
+    os.makedirs(os.path.dirname(ENCODER_PATH), exist_ok=True)
 
-    # Persist column list for future inference alignment
-    joblib.dump(encoded_columns, ENCODER_METADATA_PATH)
-    logging.info(f"Categoricals encoded: {encode_cols}. Saved metadata → {ENCODER_METADATA_PATH}")
-    return df_encoded
-
-
-def scale_numeric_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Standardize numeric features excluding identifiers and targets.
-    Saves the fitted scaler for reuse during inference.
-    """
-    exclude = {"Date", "Stock", "Next_Return"}
-    num_cols = [col for col in df.select_dtypes(include=[np.number]).columns if col not in exclude]
-
-    if not num_cols:
-        logging.warning("No numeric features found to scale.")
-        return df
-
-    scaler = StandardScaler()
-    df[num_cols] = scaler.fit_transform(df[num_cols])
-
-    # Save fitted scaler
-    joblib.dump(scaler, SCALER_PATH)
-    logging.info(f"Numeric features scaled and scaler saved → {SCALER_PATH}")
-    return df
-
-
-def reduce_memory(df: pd.DataFrame) -> pd.DataFrame:
-    """Optimize numeric data types to reduce memory usage."""
-    for col in df.select_dtypes(include=["float", "int"]).columns:
-        df[col] = pd.to_numeric(df[col], downcast="float")
-    logging.info("Memory optimization complete.")
-    return df
-
-
-# ===========================================================
-# Main Preprocessing Pipeline
-# ===========================================================
-
-def preprocessor():
-    """Run the complete preprocessing pipeline."""
     try:
-        logging.info("Loading featured dataset...")
-        df = pd.read_parquet(INPUT_PATH)
-        logging.info(f"Initial dataset shape: {df.shape}")
+        if training_mode:
+            logger.info("Fitting label encoders on categorical columns...")
+            encoders = {}
+            for col in cat_cols:
+                le = LabelEncoder()
+                df[col] = le.fit_transform(df[col])
+                encoders[col] = le
+            joblib.dump(encoders, ENCODER_PATH)
+            logger.info(f"✅ Encoders saved successfully → {ENCODER_PATH}")
+        else:
+            logger.info("Loading pre-fitted label encoders for backtest...")
+            saved_encoders = joblib.load(ENCODER_PATH)
+            for col in cat_cols:
+                if col in saved_encoders:
+                    le = saved_encoders[col]
+                    df[col] = df[col].apply(lambda x: x if x in le.classes_ else le.classes_[0])
+                    df[col] = le.transform(df[col])
+                else:
+                    logger.warning(f"Column {col} not found in saved encoders; skipping.")
+            logger.info("✅ Categorical encoding aligned with training metadata.")
+    except Exception as e:
+        logger.error(f"Encoding failed: {e}")
+        raise
+
+    return df
+
+
+def scale_numeric_features(df: pd.DataFrame, training_mode: bool = True) -> pd.DataFrame:
+    """
+    Standardize numeric features using StandardScaler.
+    During training, it fits and saves the scaler.
+    During backtest/inference, it loads and applies the saved scaler.
+    """
+    numeric_cols = df.select_dtypes(include=["float", "int"]).columns.tolist()
+    if len(numeric_cols) == 0:
+        logger.warning("No numeric columns found for scaling.")
+        return df
+
+    os.makedirs(os.path.dirname(SCALER_PATH), exist_ok=True)
+
+    try:
+        if training_mode:
+            logger.info("Fitting StandardScaler on numeric features...")
+            scaler = StandardScaler()
+            df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+            joblib.dump(scaler, SCALER_PATH)
+            logger.info(f"✅ Scaler saved successfully → {SCALER_PATH}")
+        else:
+            logger.info("Loading pre-fitted StandardScaler for inference/backtest...")
+            saved_obj = joblib.load(SCALER_PATH)
+            scaler = saved_obj["scaler"] if isinstance(saved_obj, dict) and "scaler" in saved_obj else saved_obj
+            df[numeric_cols] = scaler.transform(df[numeric_cols])
+            logger.info("✅ Numeric features scaled successfully using loaded scaler.")
+    except Exception as e:
+        logger.error(f"Error while scaling numeric features: {e}")
+        raise
+
+    return df
+
+
+# === Main Function ===
+
+def preprocessor(training_mode: bool = True, backtest: bool = False) -> pd.DataFrame:
+    """
+    Main preprocessing pipeline. Handles missing values, encoding, and scaling.
+
+    Parameters
+    ----------
+    training_mode : bool
+        If True, preprocess training data.
+    backtest : bool
+        If True, run in backtest mode.
+
+    Returns
+    -------
+    pd.DataFrame
+        Preprocessed DataFrame.
+    """
+    try:
+        if backtest:
+            input_path = FEATURED_BACKTEST_PATH
+            output_path = PROCESSED_BACKTEST_PATH
+            logger.info(f"Running in BACKTEST mode using {input_path}")
+        else:
+            input_path = FEATURED_TRAIN_PATH
+            output_path = PROCESSED_TRAIN_PATH
+            logger.info(f"Running in TRAINING mode using {input_path}")
+
+        df = pd.read_parquet(input_path)
+        logger.info(f"Initial dataset shape: {df.shape}")
 
         df = handle_missing_values(df)
-        df = encode_categoricals(df)
-        df = scale_numeric_features(df)
-        df = reduce_memory(df)
+        df = encode_categorical_features(df, training_mode=training_mode)
+        df = scale_numeric_features(df, training_mode=training_mode)
 
-        # Save processed dataset
-        os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-        df.to_parquet(OUTPUT_PATH, index=False)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        df.to_parquet(output_path, index=False)
+        logger.info(f"✅ Preprocessed data saved → {output_path}")
 
-        logging.info(f"Preprocessing complete. Final shape: {df.shape}")
-        logging.info(f"Saved preprocessed dataset → {OUTPUT_PATH}")
+        return df
 
     except Exception as e:
-        logging.exception(f"Preprocessing failed: {e}")
+        logger.error(f"Preprocessing failed: {e}")
+        raise

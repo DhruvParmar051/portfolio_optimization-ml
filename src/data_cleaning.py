@@ -5,19 +5,14 @@ Cleans raw S&P 500 stock data — validates schema, removes invalid or incomplet
 series, handles missing data gracefully, and outputs a reliable dataset for
 feature engineering and modeling.
 
-Steps:
-1. Load raw dataset with sector info
-2. Validate structure (columns, datatypes)
-3. Trim each stock from its first valid 'Close' price
-4. Remove duplicate or corrupt rows
-5. Save cleaned dataset to parquet file
-
+Supports both:
+- Full data cleaning  → data/raw_data → data/cleaned_data
+- Backtest cleaning   → data/backtest/raw_data → data/backtest/cleaned_data
 """
 
 # ===========================================================
 # Imports
 # ===========================================================
-
 import os
 import pandas as pd
 import numpy as np
@@ -28,25 +23,16 @@ from datetime import datetime
 warnings.filterwarnings("ignore")
 
 # ===========================================================
-# Configuration
+# Logging
 # ===========================================================
-
-RAW_PATH = os.path.join(os.getcwd(), "data", "raw_data", "all_stocks_data_with_sector.parquet")
-OUTPUT_DIR = os.path.join(os.getcwd(), "data", "cleaned_data")
-OUTPUT_PATH = os.path.join(OUTPUT_DIR, "cleaned_data.parquet")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 # ===========================================================
-# Helper Functions
+# Core Helper Functions
 # ===========================================================
-
 def validate_schema(df: pd.DataFrame):
     """Ensure dataset has essential columns."""
     required_cols = {"Date", "Close", "Stock", "Sector", "Industry"}
@@ -58,12 +44,12 @@ def validate_schema(df: pd.DataFrame):
 
 def trim_stock_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    For each stock, trim records to start from first valid 'Close' price.
-    Removes NaNs before first valid value.
+    Trim each stock from its first valid 'Close' value onward.
+    Removes NaNs before first valid record.
     """
     df = df.sort_values(["Stock", "Date"])
     cleaned = []
-    for stock, group in df.groupby("Stock"):
+    for stock, group in df.groupby("Stock", group_keys=False):
         first_valid = group["Close"].first_valid_index()
         if first_valid is None:
             logging.warning(f"{stock}: No valid Close values — skipped.")
@@ -71,7 +57,7 @@ def trim_stock_data(df: pd.DataFrame) -> pd.DataFrame:
         group = group.loc[first_valid:]
         cleaned.append(group)
     trimmed = pd.concat(cleaned, ignore_index=True)
-    logging.info(f"Trimmed data for {len(trimmed['Stock'].unique())} stocks.")
+    logging.info(f"Trimmed to {len(trimmed['Stock'].unique())} valid stocks.")
     return trimmed
 
 
@@ -99,35 +85,53 @@ def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def enrich_metadata(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure proper data types and add metadata fields."""
+    """Ensure correct dtypes and add metadata fields."""
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["Date"])
     df["Year"] = df["Date"].dt.year
     df["Month"] = df["Date"].dt.month
     return df
 
-# ===========================================================
-# Main Cleaning Pipeline
-# ===========================================================
 
-def data_cleaning():
-    """Run complete data cleaning pipeline."""
+# ===========================================================
+# Main Cleaning Function
+# ===========================================================
+def data_cleaning(backtest: bool = False):
+    """
+    Run complete cleaning pipeline.
+
+    Parameters:
+    - backtest: if True → use backtest paths
+    """
+    # Dynamic paths
+    base_dir = os.path.join(os.getcwd(), "data", "backtest" if backtest else "")
+    raw_path = os.path.join(base_dir, "raw_data", "backtest_data.parquet" if backtest else "all_stocks_data_with_sector.parquet")
+    output_dir = os.path.join(base_dir, "cleaned_data")
+    output_path = os.path.join(output_dir, "cleaned_data.parquet")
+    os.makedirs(output_dir, exist_ok=True)
+
     try:
-        logging.info("Loading raw dataset...")
-        df = pd.read_parquet(RAW_PATH)
-        logging.info(f"Loaded raw data: {df.shape}")
+        logging.info(f"Loading raw dataset → {raw_path}")
+        df = pd.read_parquet(raw_path)
+        logging.info(f"Loaded raw data: shape={df.shape}")
 
-        df = validate_schema(df)
-        df = trim_stock_data(df)
-        df = handle_missing_data(df)
-        df = remove_duplicates(df)
-        df = enrich_metadata(df)
+        # Cleaning pipeline
+        df = (
+            df.pipe(validate_schema)
+              .pipe(trim_stock_data)
+              .pipe(handle_missing_data)
+              .pipe(remove_duplicates)
+              .pipe(enrich_metadata)
+              .sort_values(["Stock", "Date"])
+              .reset_index(drop=True)
+        )
 
-        df = df.sort_values(["Stock", "Date"]).reset_index(drop=True)
-
-        df.to_parquet(OUTPUT_PATH, index=False)
-        logging.info(f"Cleaned dataset saved → {OUTPUT_PATH}")
+        df.to_parquet(output_path, index=False)
+        logging.info(f"✅ Cleaned dataset saved → {output_path}")
         logging.info(f"Final shape: {df.shape}")
 
+        return df
+
     except Exception as e:
-        logging.exception(f"Data cleaning failed: {e}")
+        logging.exception(f"❌ Data cleaning failed: {e}")
+        raise
