@@ -70,5 +70,3 @@ def run_backtest():
     forecasts = load_forecasts()
     logging.info(f"Loaded {forecasts.shape[0]} forecast records.")
     backtest_portfolio(forecasts)
-
-
