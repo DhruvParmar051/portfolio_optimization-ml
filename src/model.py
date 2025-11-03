@@ -40,7 +40,7 @@ MODEL_DIR = os.path.join(os.getcwd(), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 ROLLING_START = 750           # initial expanding window length
-FORECAST_HORIZON = 90         # forecast next 30 days
+FORECAST_HORIZON = 180         # forecast next 30 days
 MAX_P, MAX_D, MAX_Q = 2, 1, 2 # smaller grid for speed
 N_JOBS = max(1, os.cpu_count() // 2)  # parallel cores
 

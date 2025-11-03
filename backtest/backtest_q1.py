@@ -40,7 +40,8 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 START_DATE = "2025-01-01"
-END_DATE = "2025-03-31"
+END_DATE = "2025-06-30"
+
 
 # ============================================================
 # Utility Functions
