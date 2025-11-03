@@ -57,31 +57,31 @@ def main():
         # [1/9] Fetch Raw Data
         # ------------------------------------------------------------------
         logging.info("[1/9] Fetching raw data...")
-        data_fetch()
+        # data_fetch()
 
         # ------------------------------------------------------------------
         # [2/9] Clean Data
         # ------------------------------------------------------------------
         logging.info("[2/9] Cleaning data...")
-        data_cleaning()
+        # data_cleaning()
 
         # ------------------------------------------------------------------
         # [3/9] Feature Engineering
         # ------------------------------------------------------------------
         logging.info("[3/9] Feature engineering...")
-        feature_engineering()
+        # feature_engineering()
 
         # ------------------------------------------------------------------
         # [4/9] Preprocessing
         # ------------------------------------------------------------------
         logging.info("[4/9] Preprocessing...")
-        preprocessor()
+        # preprocessor()
 
         # ------------------------------------------------------------------
         # [5/9] Train-Validation Split
         # ------------------------------------------------------------------
         logging.info("[5/9] Creating train-validation splits...")
-        train_valid_split(valid_ratio=0.2)
+        # train_valid_split(valid_ratio=0.2)
 
         # ------------------------------------------------------------------
         # [6/9] Expanding-Window ARIMA Modeling
@@ -99,9 +99,12 @@ def main():
         # [8/9] Backtest Q1 2025
         # ------------------------------------------------------------------
         logging.info("[8/9] Running Backtest for Q1 2025...")
-        metrics = run_backtest(start_date="2025-01-01", end_date="2025-03-31")
-        logging.info("Backtest summary:")
-        logging.info(metrics.to_string(index=False))
+        metrics = run_backtest()
+        if metrics is not None and not metrics.empty:
+            logging.info(metrics.to_string(index=False))
+        else:
+            logging.warning("Backtest completed but no valid metrics were produced (likely no overlapping forecast dates).")
+
 
         # ------------------------------------------------------------------
         # [9/9] Visual Report Generation
