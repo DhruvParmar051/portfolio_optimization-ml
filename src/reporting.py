@@ -16,8 +16,6 @@ Outputs:
  - results/report/report.html
  - results/report/metrics_summary.csv
 
-Author: Dhruv
-Date: 2025-11-02
 """
 
 import os
@@ -287,5 +285,3 @@ def generate_report():
 
     except Exception as e:
         logging.exception(f"Reporting pipeline failed: {e}")
-
-

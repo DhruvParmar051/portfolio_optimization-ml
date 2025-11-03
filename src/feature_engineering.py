@@ -1,6 +1,7 @@
 """
 feature_engineering.py
 
+<<<<<<< HEAD
 Generates advanced time-series features for stock-level modeling.
 Includes rolling statistics, momentum, volatility, lagged features,
 and sector-level contextual signals.
