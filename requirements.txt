@@ -6,19 +6,29 @@ numpy
 yfinance
 requests
 
+# Visualization
 matplotlib
 seaborn
 plotly
+missingno
 
+# Core Data Science / Machine Learning
 scikit-learn
 scipy
-pulp
+
+# Time Series Modeling
 statsmodels
+pmdarima      
+arch
 
-jupyterlab 
-ipykernel
+# Optimization
+pulp
 
+# Data I/O
 pyarrow
 fastparquet
-missingno
+
+# Development / Environment
+jupyterlab 
+ipykernel
 lxml

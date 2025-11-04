@@ -68,7 +68,7 @@ def main():
         # run_expanding_arima()
 
         logging.info("[7/9] Optimizing portfolio...")
-        # portfolio_optimization()
+        portfolio_optimization()
 
         logging.info("[8/9] Running Backtest for Q1 2025...")
         metrics = run_backtest()
