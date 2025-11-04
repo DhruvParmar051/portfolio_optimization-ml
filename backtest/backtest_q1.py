@@ -1,37 +1,36 @@
 """
 backtest_q1.py
 
-Performs out-of-sample backtesting for Q1 2025
-on expanding-window ARIMA forecasts.
+Performs quarterly backtesting for ARIMA forecasts (individual-stock models).
 
-Loads per-stock forecast files from models/,
-fetches actual Yahoo Finance prices for Q1 2025,
-and compares predictions to realized returns.
+Workflow:
+1. Load latest ARIMA forecasts from models directory.
+2. Detect last forecast date (typically Dec 2024).
+3. Fetch next-quarter data from Yahoo Finance (e.g., Jan–Mar 2025).
+4. Match forecasted vs. actual prices using ±5 trading days tolerance.
+5. Compute RMSE, MAE, and Directional Accuracy per stock.
+6. Save detailed and summary results to backtest/results/.
 
 Author: Dhruv
 Date: 2025-11-03
 """
 
+# ============================================================
+# Imports
+# ============================================================
 import os
 import pandas as pd
 import numpy as np
-import yfinance as yf
 import logging
-from datetime import datetime
+import yfinance as yf
+from datetime import timedelta
 
 # ============================================================
-# Logging
-# ============================================================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-# ============================================================
-# Paths
+# Paths and setup
 # ============================================================
 BASE_DIR = os.getcwd()
-MODEL_DIR = os.path.join(BASE_DIR, "models")
+MODEL_PATH = os.path.join(BASE_DIR, "models", "arima_expanding_forecasts.parquet")
+
 BACKTEST_DIR = os.path.join(BASE_DIR, "backtest")
 DATA_DIR = os.path.join(BACKTEST_DIR, "data")
 RESULTS_DIR = os.path.join(BACKTEST_DIR, "results")
@@ -39,138 +38,123 @@ RESULTS_DIR = os.path.join(BACKTEST_DIR, "results")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-START_DATE = "2025-01-01"
-END_DATE = "2025-06-30"
-
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # ============================================================
-# Utility Functions
+# Utility functions
 # ============================================================
-
-def get_modeled_stocks():
-    """Return list of valid stock tickers from model forecast files."""
-    stocks = []
-    for file in os.listdir(MODEL_DIR):
-        if file.endswith("_forecasts.parquet"):
-            name = file.replace("_forecasts.parquet", "")
-            # Skip non-stock or invalid filenames
-            if not name.isalpha() or len(name) > 5:
-                continue
-            stocks.append(name)
-    logging.info(f"Loaded {len(stocks)} modeled stocks.")
-    return stocks
+def detect_forecast_period():
+    """Detect last forecast date and infer next quarter range."""
+    df = pd.read_parquet(MODEL_PATH)
+    df["Date"] = pd.to_datetime(df["Date"])
+    last_date = df["Date"].max()
+    next_start = last_date + timedelta(days=1)
+    next_end = next_start + timedelta(days=90)
+    stocks = df["Stock"].unique().tolist()
+    logging.info(f"Detected last forecast date = {last_date.date()}, running backtest for {next_start.date()} → {next_end.date()}")
+    return stocks, next_start, next_end, df
 
 
-def fetch_q1_data(stocks):
-    """Download Q1 2025 adjusted close prices from Yahoo Finance."""
-    if not stocks:
-        logging.error("No stocks to fetch.")
-        return None
-
-    logging.info(f"Fetching Q1 2025 price data for {len(stocks)} tickers...")
+def fetch_next_quarter_data(stocks, start, end):
+    """Fetch next-quarter price data for given tickers."""
+    logging.info(f"Fetching price data for {len(stocks)} tickers ({start.date()}–{end.date()})...")
     data = yf.download(
         tickers=stocks,
-        start=START_DATE,
-        end=END_DATE,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
         group_by="ticker",
         threads=True,
-        auto_adjust=True,
-        progress=True
+        auto_adjust=True
     )
 
-    if isinstance(data.columns, pd.MultiIndex):
-        df_list = []
-        for ticker in stocks:
-            if ticker in data.columns.get_level_values(0):
-                sub = data[ticker].reset_index()
-                sub["Stock"] = ticker
-                df_list.append(sub)
-        df = pd.concat(df_list, ignore_index=True)
-    else:
-        df = data.reset_index()
-        df["Stock"] = stocks[0]
+    all_data = []
+    for ticker in stocks:
+        try:
+            df_t = data[ticker].reset_index()[["Date", "Close"]]
+            df_t["Stock"] = ticker
+            all_data.append(df_t)
+        except Exception:
+            continue
 
-    df = df.rename(columns={"Date": "Date", "Close": "Close"})
-    df = df[["Date", "Stock", "Close"]]
-    df.to_parquet(os.path.join(DATA_DIR, "raw_q1.parquet"), index=False)
-    logging.info(f"Raw Q1 data saved → {os.path.join(DATA_DIR, 'raw_q1.parquet')}")
-
-    df["Return"] = df.groupby("Stock")["Close"].pct_change()
-    df = df.dropna()
-    df.to_parquet(os.path.join(DATA_DIR, "cleaned_q1.parquet"), index=False)
-    logging.info(f"Cleaned Q1 data saved → {os.path.join(DATA_DIR, 'cleaned_q1.parquet')}")
-    return df
+    df_all = pd.concat(all_data, ignore_index=True)
+    df_all.to_parquet(os.path.join(DATA_DIR, "q1_raw.parquet"))
+    logging.info(f"Saved Q1 raw data → {os.path.join(DATA_DIR, 'q1_raw.parquet')}")
+    return df_all
 
 
-def evaluate_forecasts(q1_df):
-    """Evaluate all stock forecasts against actual Q1 returns."""
+def evaluate_forecasts(forecasts_df, actual_df, tolerance_days=5):
+    """Match forecasts to actuals and compute backtest metrics."""
     results = []
+    forecasts_df["Date"] = pd.to_datetime(forecasts_df["Date"])
+    actual_df["Date"] = pd.to_datetime(actual_df["Date"])
 
-    for stock_file in os.listdir(MODEL_DIR):
-        if not stock_file.endswith("_forecasts.parquet"):
+    for stock in forecasts_df["Stock"].unique():
+        f_df = forecasts_df[forecasts_df["Stock"] == stock].copy()
+        a_df = actual_df[actual_df["Stock"] == stock].copy()
+        if a_df.empty or f_df.empty:
             continue
 
-        stock = stock_file.replace("_forecasts.parquet", "")
-        f_path = os.path.join(MODEL_DIR, stock_file)
-        forecast_df = pd.read_parquet(f_path)
+        # For each forecasted date, find nearest actual date within ±tolerance_days
+        merged = []
+        for _, row in f_df.iterrows():
+            diff = (a_df["Date"] - row["Date"]).abs()
+            nearest_idx = diff.idxmin()
+            if diff.min().days <= tolerance_days:
+                merged.append({
+                    "Stock": stock,
+                    "Forecast_Date": row["Date"],
+                    "Forecast": row["Forecast"],
+                    "Actual_Date": a_df.loc[nearest_idx, "Date"],
+                    "Actual": a_df.loc[nearest_idx, "Close"]
+                })
 
-        if "Date" not in forecast_df.columns or "Forecast" not in forecast_df.columns:
-            logging.warning(f"{stock}: Missing required columns in forecast file.")
+        if not merged:
             continue
 
-        forecast_df["Date"] = pd.to_datetime(forecast_df["Date"])
-        actual_df = q1_df[q1_df["Stock"] == stock].copy()
+        dfm = pd.DataFrame(merged)
+        dfm["Error"] = dfm["Actual"] - dfm["Forecast"]
+        dfm["Pct_Error"] = dfm["Error"] / dfm["Actual"]
+        dfm["Direction_Acc"] = np.sign(dfm["Forecast"].diff()) == np.sign(dfm["Actual"].diff())
 
-        if actual_df.empty:
-            continue
-
-        merged = pd.merge(
-            forecast_df, actual_df,
-            on=["Date", "Stock"], how="inner"
-        )
-
-        if merged.empty:
-            continue
-
-        merged["Error"] = merged["Forecast"] - merged["Return"]
-        rmse = np.sqrt(np.mean(merged["Error"] ** 2))
-        mae = np.mean(np.abs(merged["Error"]))
-        mape = np.mean(np.abs(merged["Error"] / merged["Return"].replace(0, np.nan))) * 100
+        rmse = np.sqrt(np.mean(dfm["Error"] ** 2))
+        mae = np.mean(np.abs(dfm["Error"]))
+        direction_acc = dfm["Direction_Acc"].mean() * 100
 
         results.append({
             "Stock": stock,
             "RMSE": rmse,
             "MAE": mae,
-            "MAPE": mape,
-            "Count": len(merged)
+            "Directional_Accuracy(%)": direction_acc,
+            "Matched_Samples": len(dfm)
         })
 
     if not results:
-        logging.warning("No overlapping forecasts and actuals found.")
+        logging.warning("No valid matches found — backtest metrics empty.")
         return None
 
-    result_df = pd.DataFrame(results).sort_values("RMSE")
-    result_path = os.path.join(RESULTS_DIR, "backtest_metrics.csv")
-    result_df.to_csv(result_path, index=False)
-    logging.info(f"Backtest metrics saved → {result_path}")
-    return result_df
+    summary = pd.DataFrame(results)
+    summary.to_csv(os.path.join(RESULTS_DIR, "backtest_summary.csv"), index=False)
+    logging.info(f"Saved backtest summary → {os.path.join(RESULTS_DIR, 'backtest_summary.csv')}")
+    return summary
 
 
 # ============================================================
-# Main Function
+# Main entry point
 # ============================================================
-
 def run_backtest():
-    """Run Q1 2025 ARIMA forecast backtest."""
-    logging.info("=== Running ARIMA Backtest for Q1 2025 ===")
-    stocks = get_modeled_stocks()
-    q1_df = fetch_q1_data(stocks)
-    if q1_df is None:
-        return None
-    metrics = evaluate_forecasts(q1_df)
-    if metrics is not None:
-        logging.info("Backtest summary:")
-        logging.info(metrics.head(10).to_string(index=False))
+    """Run Q1 2025 (or next-quarter) ARIMA backtest."""
+    logging.info("=== Running ARIMA Backtest for Next Quarter ===")
+
+    stocks, start, end, forecasts_df = detect_forecast_period()
+    actual_df = fetch_next_quarter_data(stocks, start, end)
+    summary = evaluate_forecasts(forecasts_df, actual_df)
+
+    if summary is not None:
+        logging.info("\n" + summary.describe().to_string())
     else:
-        logging.warning("Backtest produced no valid metrics.")
-    return metrics
+        logging.warning("Backtest completed but no valid metrics were produced (likely no overlapping forecast dates).")
+
+    return summary

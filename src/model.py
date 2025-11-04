@@ -41,8 +41,8 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 
 ROLLING_START = 750           # initial expanding window length
 FORECAST_HORIZON = 180         # forecast next 30 days
-MAX_P, MAX_D, MAX_Q = 2, 1, 2 # smaller grid for speed
-N_JOBS = max(1, os.cpu_count() // 2)  # parallel cores
+MAX_P, MAX_D, MAX_Q = 3, 2, 5 # smaller grid for speed
+N_JOBS = max(1, os.cpu_count())  # parallel cores
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
