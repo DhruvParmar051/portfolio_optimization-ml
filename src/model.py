@@ -45,9 +45,9 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(BACKTEST_DIR, exist_ok=True)
 
 ROLLING_START = 750           # initial expanding window length
-FORECAST_HORIZON = 30         # forecast next 30 days
+FORECAST_HORIZON = 90         # forecast next 30 days
 MAX_P, MAX_D, MAX_Q = 2, 1, 2 # smaller grid for speed
-N_JOBS = max(1, os.cpu_count() // 2)  # parallel cores
+N_JOBS = max(1, os.cpu_count())  # parallel cores
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -140,9 +140,9 @@ def expanding_window_forecast(stock, df_stock, save_dir):
 # Main pipeline
 # ============================================================
 
-def run_expanding_arima(backtest=False, save_dir=None):
+def run_expanding_arima(backtest=False, save_dir=None, symbols=None):
     """
-    Run expanding-window ARIMA in parallel for all stocks.
+    Run expanding-window ARIMA in parallel for selected stocks.
     If backtest=True → saves forecasts to results/backtest_forecasts/
     Else → saves forecasts to models/
     """
@@ -153,7 +153,11 @@ def run_expanding_arima(backtest=False, save_dir=None):
     if "Stock" not in df.columns or "Close" not in df.columns:
         raise ValueError("Expected columns ['Stock', 'Date', 'Close'].")
 
-    # Choose directory based on mode
+    # ✅ Filter to selected symbols (for backtesting subset)
+    if symbols is not None:
+        df = df[df["Stock"].isin(symbols)]
+        logging.info(f"🔍 Restricting ARIMA backtest to {len(symbols)} symbols: {symbols}")
+
     target_dir = save_dir if save_dir else (BACKTEST_DIR if backtest else MODEL_DIR)
     os.makedirs(target_dir, exist_ok=True)
 
@@ -170,7 +174,7 @@ def run_expanding_arima(backtest=False, save_dir=None):
 
     if not stocks:
         logging.info("All stocks already processed. Skipping retraining.")
-        return
+        return pd.DataFrame()
 
     results = Parallel(n_jobs=N_JOBS, verbose=10)(
         delayed(expanding_window_forecast)(s, df[df["Stock"] == s], target_dir) for s in stocks
@@ -179,7 +183,7 @@ def run_expanding_arima(backtest=False, save_dir=None):
     results = [r for r in results if r is not None]
     if not results:
         logging.warning("No results produced.")
-        return
+        return pd.DataFrame()
 
     all_df = pd.concat(results, ignore_index=True)
     summary = all_df.groupby("Stock")["RMSE"].mean().reset_index()
@@ -190,6 +194,8 @@ def run_expanding_arima(backtest=False, save_dir=None):
     all_df.to_parquet(forecasts_path, index=False)
     summary.to_csv(summary_path, index=False)
 
-    logging.info(f"Expanding-window ARIMA complete.")
+    logging.info("Expanding-window ARIMA complete.")
     logging.info(f"Forecasts saved → {forecasts_path}")
     logging.info(f"Summary saved → {summary_path}")
+
+    return all_df

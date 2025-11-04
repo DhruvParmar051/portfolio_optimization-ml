@@ -11,7 +11,7 @@ Modes:
 
 Outputs:
 - data/featured_data/featured_data.parquet  (for training)
-- data/backtest/featured_data_backtest.parquet  (for backtesting)
+- data/backtest/featured_data/featured_data.parquet  (for backtesting)
 """
 
 # ===========================================================
@@ -25,15 +25,13 @@ import pandas as pd
 # ===========================================================
 # Configuration
 # ===========================================================
-INPUT_PATH = os.path.join(os.getcwd(), "data", "cleaned_data", "cleaned_data.parquet")
 FEATURED_DIR = os.path.join(os.getcwd(), "data", "featured_data")
-BACKTEST_DIR = os.path.join(os.getcwd(), "data", "backtest")
-
+BACKTEST_DIR = os.path.join(os.getcwd(), "data", "backtest", "featured_data")
 os.makedirs(FEATURED_DIR, exist_ok=True)
 os.makedirs(BACKTEST_DIR, exist_ok=True)
 
 FEATURED_PATH = os.path.join(FEATURED_DIR, "featured_data.parquet")
-BACKTEST_FEATURED_PATH = os.path.join(BACKTEST_DIR, "featured_data_backtest.parquet")
+BACKTEST_FEATURED_PATH = os.path.join(BACKTEST_DIR, "featured_data.parquet")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,20 +52,23 @@ def add_rolling_features(df: pd.DataFrame, long_window: int = 750) -> pd.DataFra
     df = df.sort_values(["Stock", "Date"])
 
     def _calc_features(group):
-        group["MA_20"] = group["Close"].rolling(window=20, min_periods=5).mean()
-        group["MA_50"] = group["Close"].rolling(window=min(50, long_window//5), min_periods=5).mean()
-        group["MA_200"] = group["Close"].rolling(window=min(200, long_window//2), min_periods=10).mean()
+        def safe_minp(window):
+            return min(5, window)  # ensure min_periods <= window
 
-        group["Volatility_20d"] = group["Daily_Return"].rolling(window=20, min_periods=5).std()
-        group["Volatility_60d"] = group["Daily_Return"].rolling(window=min(60, long_window//10), min_periods=5).std()
-        group["Volatility_250d"] = group["Daily_Return"].rolling(window=min(250, long_window//3), min_periods=10).std()
+        group["MA_20"] = group["Close"].rolling(window=min(20, long_window), min_periods=safe_minp(min(20, long_window))).mean()
+        group["MA_50"] = group["Close"].rolling(window=min(50, long_window), min_periods=safe_minp(min(50, long_window))).mean()
+        group["MA_200"] = group["Close"].rolling(window=min(200, long_window), min_periods=safe_minp(min(200, long_window))).mean()
 
-        group["Momentum_20d"] = group["Close"].pct_change(periods=min(20, long_window//30))
-        group["Momentum_60d"] = group["Close"].pct_change(periods=min(60, long_window//15))
-        group["Momentum_250d"] = group["Close"].pct_change(periods=min(250, long_window//3))
+        group["Volatility_20d"] = group["Daily_Return"].rolling(window=min(20, long_window), min_periods=safe_minp(min(20, long_window))).std()
+        group["Volatility_60d"] = group["Daily_Return"].rolling(window=min(60, long_window), min_periods=safe_minp(min(60, long_window))).std()
+        group["Volatility_250d"] = group["Daily_Return"].rolling(window=min(250, long_window), min_periods=safe_minp(min(250, long_window))).std()
 
-        group["Rolling_Max"] = group["Close"].rolling(window=long_window, min_periods=5).max()
-        group["Rolling_Min"] = group["Close"].rolling(window=long_window, min_periods=5).min()
+        group["Momentum_20d"] = group["Close"].pct_change(periods=min(20, long_window))
+        group["Momentum_60d"] = group["Close"].pct_change(periods=min(60, long_window))
+        group["Momentum_250d"] = group["Close"].pct_change(periods=min(250, long_window))
+
+        group["Rolling_Max"] = group["Close"].rolling(window=min(long_window, 250), min_periods=safe_minp(min(long_window, 250))).max()
+        group["Rolling_Min"] = group["Close"].rolling(window=min(long_window, 250), min_periods=safe_minp(min(long_window, 250))).min()
         return group
 
     df = df.groupby("Stock", group_keys=False).apply(_calc_features)
@@ -106,7 +107,6 @@ def reduce_memory(df: pd.DataFrame) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], downcast="float")
     return df
 
-
 # ===========================================================
 # Main Function
 # ===========================================================
@@ -116,18 +116,22 @@ def feature_engineering(start_date: str = None, end_date: str = None):
     If start_date & end_date provided, run in backtest mode.
     """
     try:
-        logging.info("Loading cleaned dataset...")
-        df = pd.read_parquet(INPUT_PATH)
-        logging.info(f"Loaded data shape: {df.shape}")
+        if start_date and end_date:
+            input_path = os.path.join(os.getcwd(), "data", "backtest", "cleaned_data", "cleaned_data.parquet")
+            backtest = True
+        else:
+            input_path = os.path.join(os.getcwd(), "data", "cleaned_data", "cleaned_data.parquet")
+            backtest = False
 
-        # Detect backtest mode
-        backtest = bool(start_date and end_date)
+        logging.info(f"Loading cleaned dataset → {input_path}")
+        df = pd.read_parquet(input_path)
+        logging.info(f"Loaded data shape: {df.shape}")
 
         if backtest:
             logging.info(f"Running in BACKTEST mode: {start_date} → {end_date}")
             df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
-            long_window = 30
-            lags = [1, 2, 3]
+            long_window = 15  # smaller rolling window for short periods
+            lags = [1, 2]
             save_path = BACKTEST_FEATURED_PATH
         else:
             logging.info("Running in TRAINING mode (full dataset).")
@@ -139,7 +143,7 @@ def feature_engineering(start_date: str = None, end_date: str = None):
             logging.warning("⚠️ No data available after applying date filter.")
             return pd.DataFrame()
 
-        # --- Pipeline ---
+        # --- Feature Pipeline ---
         df = compute_basic_returns(df)
         df = add_rolling_features(df, long_window=long_window)
         df = add_sector_features(df)
