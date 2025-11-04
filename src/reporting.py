@@ -16,8 +16,6 @@ Outputs:
  - results/report/report.html
  - results/report/metrics_summary.csv
 
-Author: Dhruv
-Date: 2025-11-02
 """
 
 import os
@@ -33,9 +31,9 @@ from typing import Tuple
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Paths
-PORTFOLIO_DIR = os.path.join(os.getcwd(), "results")
+PORTFOLIO_DIR = os.path.join(os.getcwd(), "results", "portfolio")
 REPORT_DIR = os.path.join(os.getcwd(), "results", "report")
-MODEL_SUMMARY = os.path.join(os.getcwd(), "models", "arima_expanding_summary.csv")
+MODEL_SUMMARY = os.path.join(os.getcwd(), "models", "arima_expanding", "arima_expanding_summary.csv")
 
 os.makedirs(REPORT_DIR, exist_ok=True)
 
@@ -138,8 +136,8 @@ def load_inputs() -> Tuple[pd.Series, pd.DataFrame, pd.DataFrame]:
     Load portfolio cumulative, weights, and optional model summary.
     Returns (portfolio_returns, weights_df, model_summary_df)
     """
-    cum_path = os.path.join(PORTFOLIO_DIR, "portfolio_summary.csv")
-    weights_path = os.path.join(PORTFOLIO_DIR, "optimized_weights.csv")
+    cum_path = os.path.join(PORTFOLIO_DIR, "portfolio_cumulative.csv")
+    weights_path = os.path.join(PORTFOLIO_DIR, "portfolio_weights.csv")
 
     if not os.path.exists(cum_path):
         raise FileNotFoundError(f"Missing {cum_path}. Run optimize_portfolio first.")
@@ -287,5 +285,3 @@ def generate_report():
 
     except Exception as e:
         logging.exception(f"Reporting pipeline failed: {e}")
-
-

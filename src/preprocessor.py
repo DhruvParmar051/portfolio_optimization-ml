@@ -1,10 +1,14 @@
 """
 preprocessor.py
 
-Preprocesses cleaned and feature-engineered stock market data.
-Handles missing values, encoding, and scaling for both training and backtesting.
+Production-level preprocessing module for stock-level and sector-level features.
 
-Includes automatic column alignment between training and backtesting.
+Responsibilities:
+1. Handle missing values in numeric and categorical columns.
+2. Encode selected categorical variables (Sector, Industry) using one-hot encoding.
+3. Scale numeric features with StandardScaler.
+4. Persist preprocessing artifacts (scaler and metadata) for reproducibility.
+5. Save preprocessed dataset ready for model training.
 """
 
 # ===========================================================
@@ -12,200 +16,131 @@ Includes automatic column alignment between training and backtesting.
 # ===========================================================
 import os
 import logging
+import joblib
 import pandas as pd
 import numpy as np
-import joblib
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 
 # ===========================================================
-# Logging Configuration
+# Configuration
 # ===========================================================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+
+INPUT_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
+OUTPUT_DIR = os.path.join(os.getcwd(), "data", "preprocessed_data")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_PATH = os.path.join(OUTPUT_DIR, "preprocessed_data.parquet")
+
+
+ARTIFACT_DIR = os.path.join(os.getcwd(), "artifacts", "preprocessing")
+os.makedirs(ARTIFACT_DIR, exist_ok=True)
+
+SCALER_PATH = os.path.join(ARTIFACT_DIR, "scaler.pkl")
+ENCODER_METADATA_PATH = os.path.join(ARTIFACT_DIR, "encoder_columns.pkl")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # ===========================================================
-# File Paths
+# Helper Functions
 # ===========================================================
-FEATURED_TRAIN_PATH = os.path.join(os.getcwd(), "data", "featured_data", "featured_data.parquet")
-FEATURED_BACKTEST_PATH = os.path.join(os.getcwd(), "data", "backtest", "featured_data", "featured_data.parquet")
-
-PROCESSED_TRAIN_PATH = os.path.join(os.getcwd(), "data", "processed_data", "processed_data.parquet")
-PROCESSED_BACKTEST_PATH = os.path.join(os.getcwd(), "data", "backtest", "processed_data", "processed_data.parquet")
-
-SCALER_PATH = os.path.join(os.getcwd(), "models", "scaler.joblib")
-ENCODER_PATH = os.path.join(os.getcwd(), "models", "encoder.joblib")
 
 # ===========================================================
 # Utility Functions
 # ===========================================================
 def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Handle missing values by forward/backward filling and dropping residual NaNs."""
-    id_col = "Stock" if "Stock" in df.columns else "Symbol"
-    df = df.sort_values(by=[id_col, "Date"])
-    df = df.groupby(id_col).apply(lambda g: g.ffill().bfill()).reset_index(drop=True)
-    df = df.dropna()
-    logger.info("Missing values handled successfully.")
-    return df
-
-
-def fit_and_save_encoders(df: pd.DataFrame) -> dict:
-    """Fit label encoders on training dataset and save them."""
+    """Fill missing values for both numeric and categorical columns."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
-    encoders = {}
+
+    # Fill numeric columns with median (robust to outliers)
+    for col in num_cols:
+        median = df[col].median()
+        df[col].fillna(median, inplace=True)
+
+    # Fill categoricals with mode (most frequent)
     for col in cat_cols:
-        le = LabelEncoder()
-        df[col] = df[col].fillna("UNKNOWN").astype(str)
-        le.fit(df[col])
-        df[col] = le.transform(df[col])
-        encoders[col] = le
-        logger.info(f"Encoder fitted for '{col}' with {len(le.classes_)} classes.")
-    joblib.dump(encoders, ENCODER_PATH)
-    logger.info(f"✅ Encoders saved successfully → {ENCODER_PATH}")
-    return encoders
-
-
-def encode_categorical_features(df: pd.DataFrame, training_mode: bool = True) -> pd.DataFrame:
-    """
-    Encode categorical variables (like Sector, Stock).
-    Automatically rebuilds encoders if missing.
-    """
-    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
-    if len(cat_cols) == 0:
-        logger.info("No categorical columns found for encoding.")
-        return df
-
-    os.makedirs(os.path.dirname(ENCODER_PATH), exist_ok=True)
-
-    try:
-        if training_mode:
-            encoders = fit_and_save_encoders(df)
+        mode = df[col].mode()
+        if not mode.empty:
+            df[col].fillna(mode.iloc[0], inplace=True)
         else:
-            logger.info("Loading pre-fitted label encoders for backtest...")
-            if not os.path.exists(ENCODER_PATH):
-                logger.warning("⚠️ Encoder file missing — retraining encoders using training dataset.")
-                if not os.path.exists(FEATURED_TRAIN_PATH):
-                    raise FileNotFoundError("Training data not found for retraining encoders.")
-                train_df = pd.read_parquet(FEATURED_TRAIN_PATH)
-                fit_and_save_encoders(train_df)
+            df[col].fillna("Unknown", inplace=True)
 
-            saved_encoders = joblib.load(ENCODER_PATH)
-            for col in cat_cols:
-                df[col] = df[col].fillna("UNKNOWN").astype(str)
-                if col in saved_encoders:
-                    le = saved_encoders[col]
-                    if len(le.classes_) == 0:
-                        logger.warning(f"⚠️ Encoder for '{col}' is empty. Skipping encoding.")
-                        continue
-                    df[col] = df[col].apply(lambda x: x if x in le.classes_ else "UNKNOWN")
-                    if "UNKNOWN" not in le.classes_:
-                        le.classes_ = np.append(le.classes_, "UNKNOWN")
-                    df[col] = le.transform(df[col])
-                else:
-                    logger.warning(f"⚠️ Column '{col}' not found in saved encoders. Skipping.")
-            logger.info("✅ Categorical encoding aligned with training metadata.")
-
-    except Exception as e:
-        logger.error(f"Encoding failed: {e}")
-        raise
-
+    logging.info("Missing values handled successfully.")
     return df
 
 
-def fit_and_save_scaler(df: pd.DataFrame) -> StandardScaler:
-    """Fit StandardScaler and save it."""
-    numeric_cols = df.select_dtypes(include=["float", "int"]).columns.tolist()
+def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Encode 'Sector' and 'Industry' using one-hot encoding.
+    Persists encoder column list for consistency during inference.
+    """
+    encode_cols = [col for col in ["Sector", "Industry"] if col in df.columns]
+    if not encode_cols:
+        logging.warning("No categorical columns found for encoding.")
+        return df
+
+    df_encoded = pd.get_dummies(df, columns=encode_cols, drop_first=True)
+    encoded_columns = df_encoded.columns.tolist()
+
+    # Persist column list for future inference alignment
+    joblib.dump(encoded_columns, ENCODER_METADATA_PATH)
+    logging.info(f"Categoricals encoded: {encode_cols}. Saved metadata → {ENCODER_METADATA_PATH}")
+    return df_encoded
+
+
+def scale_numeric_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardize numeric features excluding identifiers and targets.
+    Saves the fitted scaler for reuse during inference.
+    """
+    exclude = {"Date", "Stock", "Next_Return"}
+    num_cols = [col for col in df.select_dtypes(include=[np.number]).columns if col not in exclude]
+
+    if not num_cols:
+        logging.warning("No numeric features found to scale.")
+        return df
+
     scaler = StandardScaler()
-    df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
-    joblib.dump({"scaler": scaler, "columns": numeric_cols}, SCALER_PATH)
-    logger.info(f"✅ Scaler trained and saved → {SCALER_PATH}")
-    return scaler
+    df[num_cols] = scaler.fit_transform(df[num_cols])
+
+    # Save fitted scaler
+    joblib.dump(scaler, SCALER_PATH)
+    logging.info(f"Numeric features scaled and scaler saved → {SCALER_PATH}")
+    return df
 
 
-def scale_numeric_features(df: pd.DataFrame, training_mode: bool = True) -> pd.DataFrame:
-    """
-    Standardize numeric features using StandardScaler.
-    Automatically rebuilds scaler if missing and aligns columns.
-    """
-    numeric_cols = df.select_dtypes(include=["float", "int"]).columns.tolist()
-    if len(numeric_cols) == 0:
-        logger.warning("No numeric columns found for scaling.")
-        return df
-
-    os.makedirs(os.path.dirname(SCALER_PATH), exist_ok=True)
-
-    try:
-        if training_mode:
-            fit_and_save_scaler(df)
-        else:
-            logger.info("Loading pre-fitted StandardScaler for inference/backtest...")
-            if not os.path.exists(SCALER_PATH):
-                logger.warning("⚠️ Scaler file missing — retraining scaler using training dataset.")
-                if not os.path.exists(FEATURED_TRAIN_PATH):
-                    raise FileNotFoundError("Training data not found for retraining scaler.")
-                train_df = pd.read_parquet(FEATURED_TRAIN_PATH)
-                fit_and_save_scaler(train_df)
-
-            saved_obj = joblib.load(SCALER_PATH)
-            scaler = saved_obj.get("scaler", saved_obj)
-            train_cols = saved_obj.get("columns", numeric_cols)
-
-            # === Align Columns ===
-            for col in train_cols:
-                if col not in df.columns:
-                    df[col] = 0.0  # Add missing with neutral value
-                    logger.warning(f"⚠️ Added missing feature '{col}' with zeros for alignment.")
-            df = df[[c for c in train_cols if c in df.columns]]  # reorder and remove extras
-
-            df[train_cols] = scaler.transform(df[train_cols])
-            logger.info("✅ Numeric features scaled successfully and aligned with training metadata.")
-
-    except Exception as e:
-        logger.error(f"Error while scaling numeric features: {e}")
-        raise
-
+def reduce_memory(df: pd.DataFrame) -> pd.DataFrame:
+    """Optimize numeric data types to reduce memory usage."""
+    for col in df.select_dtypes(include=["float", "int"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="float")
+    logging.info("Memory optimization complete.")
     return df
 
 
 # ===========================================================
-# Main Preprocessing Function
+# Main Preprocessing Pipeline
 # ===========================================================
-def preprocessor(training_mode: bool = True, backtest: bool = False) -> pd.DataFrame:
-    """
-    Main preprocessing pipeline. Handles missing values, encoding, and scaling.
-    """
+
+def preprocessor():
+    """Run the complete preprocessing pipeline."""
     try:
-        if backtest:
-            input_path = FEATURED_BACKTEST_PATH
-            output_path = PROCESSED_BACKTEST_PATH
-            logger.info(f"Running in BACKTEST mode using {input_path}")
-        else:
-            input_path = FEATURED_TRAIN_PATH
-            output_path = PROCESSED_TRAIN_PATH
-            logger.info(f"Running in TRAINING mode using {input_path}")
-
-        if not os.path.exists(input_path):
-            raise FileNotFoundError(f"Input data not found at {input_path}")
-
-        df = pd.read_parquet(input_path)
-        logger.info(f"Initial dataset shape: {df.shape}")
+        logging.info("Loading featured dataset...")
+        df = pd.read_parquet(INPUT_PATH)
+        logging.info(f"Initial dataset shape: {df.shape}")
 
         df = handle_missing_values(df)
-        df = encode_categorical_features(df, training_mode=training_mode)
-        df = scale_numeric_features(df, training_mode=training_mode)
+        df = encode_categoricals(df)
+        df = scale_numeric_features(df)
+        df = reduce_memory(df)
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        df.to_parquet(output_path, index=False)
-        logger.info(f"✅ Preprocessed data saved → {output_path}")
-        logger.info(f"Final dataset shape: {df.shape}")
+        # Save processed dataset
+        os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+        df.to_parquet(OUTPUT_PATH, index=False)
 
-        return df
+        logging.info(f"Preprocessing complete. Final shape: {df.shape}")
+        logging.info(f"Saved preprocessed dataset → {OUTPUT_PATH}")
 
     except Exception as e:
-        logger.error(f"Preprocessing failed: {e}")
-        raise
-
-
-if __name__ == "__main__":
-    logger.info("=== Running Preprocessor Standalone ===")
-    df = preprocessor(training_mode=True, backtest=False)
-    logger.info(f"✅ Preprocessing complete. Final shape: {df.shape}")
+        logging.exception(f"Preprocessing failed: {e}")
